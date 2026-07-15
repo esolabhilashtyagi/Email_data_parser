@@ -6,6 +6,16 @@ from google import genai
 from google.genai import types
 from dotenv import load_dotenv
 
+# OCR fallback for scanned PDFs
+try:
+    from pdf2image import convert_from_path
+    import pytesseract
+    OCR_AVAILABLE = True
+    print("[OCR] pytesseract + pdf2image available")
+except ImportError:
+    OCR_AVAILABLE = False
+    print("[OCR] pytesseract/pdf2image not installed — OCR fallback disabled")
+
 # --------------------------------------------------------------
 #  Recruitment PDF extractor - Gemini powered (google-genai SDK)
 # --------------------------------------------------------------
@@ -20,41 +30,83 @@ client = genai.Client(api_key=API_KEY)
 MODEL_NAME = "gemini-3.5-flash"
 
 
+def ocr_pdf(pdf_path: str) -> str:
+    """OCR a scanned PDF using pdf2image + pytesseract."""
+    if not OCR_AVAILABLE:
+        return ""
+    try:
+        images = convert_from_path(pdf_path, dpi=300)
+        texts = []
+        for i, img in enumerate(images):
+            text = pytesseract.image_to_string(img, lang='eng')
+            texts.append(text)
+        result = "\n".join(texts).strip()
+        fname = os.path.basename(pdf_path)
+        print(f"[OCR] '{fname}': extracted {len(result)} chars via Tesseract")
+        return result
+    except Exception as e:
+        print(f"[OCR ERROR] {pdf_path}: {e}")
+        return ""
+
+
 def pdf_to_text(pdf_path: str) -> str:
-    """Extract plain text from a PDF using pdfplumber."""
+    """Extract text from PDF. Uses pdfplumber first, falls back to OCR for scanned docs."""
     try:
         with pdfplumber.open(pdf_path) as pdf:
             pages = [page.extract_text() or "" for page in pdf.pages]
         text = "\n".join(pages).strip()
         fname = os.path.basename(pdf_path)
-        print(f"[PDF] '{fname}': extracted {len(text)} chars | preview: {repr(text[:200])}")
+        print(f"[PDF] '{fname}': pdfplumber extracted {len(text)} chars")
+        
+        # If pdfplumber got very little text, try OCR
+        if len(text) < 50:
+            print(f"[PDF] '{fname}': too little text, trying OCR fallback...")
+            ocr_text = ocr_pdf(pdf_path)
+            if len(ocr_text) > len(text):
+                print(f"[PDF] '{fname}': using OCR result ({len(ocr_text)} chars)")
+                return ocr_text
+        
         return text
     except Exception as e:
         print(f"[PDF ERROR] {pdf_path}: {e}")
-        return ""
+        # Try OCR as last resort
+        return ocr_pdf(pdf_path)
 
 
 PROMPT_TEMPLATE = '''
-You are an expert HR recruiter and document parser.
-You will receive text extracted from MULTIPLE documents that may belong to MULTIPLE different candidates.
-These could be CVs/Resumes, marksheets, experience letters, offer letters, etc.
+You are an expert HR recruiter and document parser with OCR expertise.
+You will receive MULTIPLE documents (PDFs with images/scans) that may belong to MULTIPLE different candidates.
+These include CVs/Resumes, marksheets (scanned images), experience letters, offer letters, degree certificates, etc.
 
-STEP 1 - IDENTIFY CANDIDATES:
-- First, figure out how many DISTINCT candidates are present in the documents.
-- Group the documents by candidate. Use names, roll numbers, and content to determine which documents belong to which candidate.
-- A candidate's CV/resume, their marksheets, and their experience letters will typically share the same name.
+CRITICAL: Many documents are SCANNED IMAGES of marksheets. You MUST carefully OCR and read every single page of every document. Do NOT skip any document.
 
-STEP 2 - EXTRACT DATA FOR EACH CANDIDATE:
+STEP 1 - READ EVERY DOCUMENT CAREFULLY:
+- Open and read EVERY attached PDF thoroughly, even if it is a scanned image.
+- For marksheets: Read the subject-wise marks table, the total marks, the percentage, the board name, the passing year, and the student name.
+- For CVs/Resumes: Read every section including education, experience, contact details, personal info.
+- For experience/offer letters: Read the candidate name, company, dates, role.
+
+STEP 2 - IDENTIFY CANDIDATES:
+- Figure out how many DISTINCT candidates are present across all documents.
+- Group documents by candidate using names visible in the documents.
+
+STEP 3 - EXTRACT DATA FOR EACH CANDIDATE:
 For each candidate, extract their information into the JSON structure shown below.
 
-RULES FOR MARKS & PERCENTAGES:
-1. Search every document for any mention of marks, grades, or percentages for each qualification level.
-2. Even if it is just a line in the CV like "M.Com - 67.20%" or "BCA: 64.36%", extract that percentage.
-3. For marks, look for patterns like "450/600", "1609/2000", "450 out of 600", or subject-wise tables. Output as "obtained/total".
-4. If marks are found but percentage is not written, CALCULATE: (obtained/total)*100 rounded to 2 decimal places, add "%" sign.
-5. If CGPA is mentioned (e.g. "8.5 CGPA"), store it in the percentage field as "8.5 CGPA". If a conversion is given (x9.5 or x10), apply it.
-6. NEVER leave percentage empty if ANY number like a grade/percent/marks is mentioned for that qualification in any document.
-7. For 10th and 12th, look closely at board marksheets. The marks are often in a subject-wise table. Sum the marks if a total is not explicitly provided.
+CRITICAL RULES FOR MARKS & PERCENTAGES (MUST FOLLOW):
+1. EVERY marksheet PDF contains marks. You MUST read the scanned image carefully and extract them.
+2. For Indian board marksheets (CBSE, ICSE, UP Board, MP Board, Bihar Board, etc.):
+   - Look for a table with subject names and marks columns
+   - Find "Total Marks" or "Grand Total" row. If not present, SUM all subject marks yourself.
+   - Find "Maximum Marks" (usually 500 for 5 subjects, 600 for 6 subjects, etc.)
+   - Output marks as "obtained/total" (e.g., "425/500", "1609/2000")
+3. For university marksheets/grade cards:
+   - Look for SGPA, CGPA, total marks, or percentage printed on the document
+   - If CGPA is given, store as "8.5 CGPA" in percentage field
+4. If marks are found but percentage is NOT explicitly written, CALCULATE IT: (obtained/total)*100, round to 2 decimals.
+5. Also check the CV/Resume — it often lists percentages like "10th - 82.4%", "B.Tech - 8.2 CGPA", "12th - 78%"
+6. NEVER leave marks AND percentage BOTH empty if a marksheet PDF exists for that level. Extract SOMETHING.
+7. If you truly cannot read the marksheet at all, put "Unable to read" in the marks field.
 
 RULES FOR EXPERIENCE:
 - Sum only full-time job durations from ALL documents (CV + experience letters) for that candidate.
@@ -63,16 +115,15 @@ RULES FOR EXPERIENCE:
 
 RULES FOR PERSONAL DETAILS:
 - State: Look at the candidate's address in the CV. Extract just the State name (e.g., "Maharashtra", "Delhi", "Gujarat").
-- Gender: If explicitly stated, use it. If not, infer from the name or salutations (Mr./Ms.) if obvious. Otherwise leave blank.
-- Date of Birth: Look for "DOB", "Date of Birth", or similar. Extract in the format found.
-- Phone & Email: Thoroughly check the header/footer of the CV for contact details.
+- Gender: If explicitly stated, use it. If not, infer from name or salutations (Mr./Ms.) if obvious. Otherwise leave blank.
+- Date of Birth: Look for "DOB", "Date of Birth", or similar. Also check marksheets — Indian marksheets often show DOB.
+- Phone & Email: Thoroughly check the header/footer of the CV and also marksheets for contact details.
 
 RULES FOR DOCUMENT LINKS:
 - Look at each document header "--- Document: filename.pdf ---".
 - For marksheet_link: put the filename of the document that is a marksheet for that level.
-- For experience_letter_link: put the filename of the experience letter document.
+- For experience_letter_link: put the filename of the experience letter/offer letter document.
 - For resume_link: put the filename of the CV/Resume document.
-- If a single CV contains all data, use that filename for resume_link and leave marksheet_link empty.
 
 Return ONLY a valid JSON ARRAY, even if there is only one candidate. No markdown, no explanation, no extra text.
 
