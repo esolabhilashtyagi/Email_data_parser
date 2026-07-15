@@ -1,6 +1,7 @@
 import os
 import json
 import uuid
+import threading
 import pandas as pd
 from flask import Flask, render_template, request, jsonify, send_file
 from werkzeug.utils import secure_filename
@@ -12,12 +13,14 @@ UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), "uploads")
 OUTPUT_CSV = os.path.join(os.path.dirname(__file__), "recruitment_tracker.csv")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+# In-memory job store
+jobs = {}
+
 
 def make_excel_link(filename: str) -> str:
     """Format a local file path as a clickable Excel HYPERLINK formula."""
     if not filename:
         return ""
-    # Make sure we use the absolute path for the hyperlink to work anywhere
     abs_path = os.path.abspath(os.path.join(UPLOAD_FOLDER, filename)).replace("\\", "/")
     return f'=HYPERLINK("file:///{abs_path}", "View Document")'
 
@@ -67,6 +70,46 @@ def flatten_candidate(data: dict, serial: int, pdf_path: str) -> dict:
     }
 
 
+def process_job(job_id, save_paths, start_serial, existing):
+    """Background worker: calls Gemini, saves CSV, updates job status."""
+    try:
+        jobs[job_id]["status"] = "processing"
+        jobs[job_id]["message"] = "Gemini AI is analyzing your PDFs..."
+
+        candidates_list = extract_candidate_details(save_paths)
+
+        results = []
+        for raw_data in candidates_list:
+            serial = start_serial + len(results)
+            flat = flatten_candidate(raw_data, serial, "")
+            results.append(flat)
+
+        # Append to tracker CSV
+        if results:
+            new_df = pd.DataFrame(results)
+            if existing is not None:
+                final_df = pd.concat([existing, new_df], ignore_index=True)
+            else:
+                final_df = new_df
+            final_df.to_csv(OUTPUT_CSV, index=False)
+
+        jobs[job_id]["status"] = "done"
+        jobs[job_id]["results"] = {
+            "success": True,
+            "extracted": results,
+            "errors": [],
+            "total_in_tracker": (len(existing) if existing is not None else 0) + len(results),
+        }
+    except Exception as e:
+        jobs[job_id]["status"] = "error"
+        jobs[job_id]["results"] = {
+            "success": False,
+            "extracted": [],
+            "errors": [{"file": "Batch Processing", "error": str(e)}],
+            "total_in_tracker": 0,
+        }
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -74,7 +117,7 @@ def index():
 
 @app.route("/upload", methods=["POST"])
 def upload():
-    """Accept multiple PDFs, extract data via Gemini, return JSON results."""
+    """Accept PDFs, save them, start background job, return job_id immediately."""
     if "files" not in request.files:
         return jsonify({"error": "No files uploaded"}), 400
 
@@ -90,10 +133,7 @@ def upload():
         existing = None
         start_serial = 1
 
-    results = []
     errors = []
-
-    # Save all uploaded PDFs first
     save_paths = []
     for file in files:
         if not file.filename.lower().endswith(".pdf"):
@@ -104,32 +144,39 @@ def upload():
         file.save(save_path)
         save_paths.append(save_path)
 
-    # Send ALL PDFs to Gemini in one call — it identifies candidates and returns a list
-    if save_paths:
-        try:
-            candidates_list = extract_candidate_details(save_paths)
-            for i, raw_data in enumerate(candidates_list):
-                serial = start_serial + len(results)
-                flat = flatten_candidate(raw_data, serial, "")
-                results.append(flat)
-        except Exception as e:
-            errors.append({"file": "Batch Processing", "error": str(e)})
+    if not save_paths:
+        return jsonify({"error": "No valid PDF files", "errors": errors}), 400
 
-    # Append to tracker CSV
-    if results:
-        new_df = pd.DataFrame(results)
-        if existing is not None:
-            final_df = pd.concat([existing, new_df], ignore_index=True)
-        else:
-            final_df = new_df
-        final_df.to_csv(OUTPUT_CSV, index=False)
+    # Create job and start background thread
+    job_id = uuid.uuid4().hex[:12]
+    jobs[job_id] = {
+        "status": "uploading",
+        "message": f"Uploading {len(save_paths)} PDF(s) to Gemini...",
+        "results": None,
+    }
 
-    return jsonify({
-        "success": True,
-        "extracted": results,
-        "errors": errors,
-        "total_in_tracker": (len(existing) if existing is not None else 0) + len(results),
-    })
+    thread = threading.Thread(target=process_job, args=(job_id, save_paths, start_serial, existing))
+    thread.daemon = True
+    thread.start()
+
+    # Return immediately with job_id — frontend will poll /job/<id>
+    return jsonify({"job_id": job_id, "file_count": len(save_paths)})
+
+
+@app.route("/job/<job_id>")
+def job_status(job_id):
+    """Poll endpoint: returns job status and results when done."""
+    job = jobs.get(job_id)
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+
+    if job["status"] in ("done", "error"):
+        # Clean up job from memory after delivering results
+        results = job["results"]
+        del jobs[job_id]
+        return jsonify({"status": job["status"], **results})
+
+    return jsonify({"status": job["status"], "message": job.get("message", "Processing...")})
 
 
 @app.route("/tracker")

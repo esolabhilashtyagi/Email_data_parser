@@ -90,7 +90,12 @@ function renderFileList() {
 }
 
 // ---- Process Files ----
-// Send ALL files in one request. Gemini identifies candidates automatically.
+// Upload files → get job_id → poll /job/<id> until done.
+// This avoids Render's 30-second request timeout.
+
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 async function processFiles() {
     if (selectedFiles.length === 0) {
@@ -104,10 +109,10 @@ async function processFiles() {
     errorsPanel.style.display = 'none';
 
     const statusEl = document.getElementById('processingStatus');
-    if (statusEl) statusEl.textContent = `Uploading ${selectedFiles.length} file(s) and analyzing with Gemini AI...`;
-
     const progressEl = document.getElementById('progressFill');
-    if (progressEl) progressEl.style.width = '30%';
+
+    if (statusEl) statusEl.textContent = `Uploading ${selectedFiles.length} file(s)...`;
+    if (progressEl) progressEl.style.width = '10%';
 
     const formData = new FormData();
     selectedFiles.forEach(f => formData.append('files', f));
@@ -116,33 +121,62 @@ async function processFiles() {
     let allErrors = [];
 
     try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 600000); // 10 min timeout
+        // Step 1: Upload files and get job_id (returns instantly)
+        const uploadResp = await fetch('/upload', { method: 'POST', body: formData });
+        const uploadData = await uploadResp.json();
 
-        if (statusEl) statusEl.textContent = `Gemini AI is reading ${selectedFiles.length} PDF(s) and identifying candidates...`;
-        if (progressEl) progressEl.style.width = '50%';
-
-        const response = await fetch('/upload', {
-            method: 'POST',
-            body: formData,
-            signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-
-        if (progressEl) progressEl.style.width = '90%';
-
-        const data = await response.json();
-        if (response.ok) {
-            allResults = data.extracted || [];
-            allErrors = data.errors || [];
-        } else {
-            allErrors.push({ file: 'Upload', error: data.error || 'Upload failed' });
+        if (!uploadResp.ok || !uploadData.job_id) {
+            allErrors.push({ file: 'Upload', error: uploadData.error || 'Upload failed' });
+            throw new Error('Upload failed');
         }
+
+        const jobId = uploadData.job_id;
+        if (statusEl) statusEl.textContent = `Gemini AI is analyzing ${uploadData.file_count} PDF(s)...`;
+        if (progressEl) progressEl.style.width = '30%';
+
+        // Step 2: Poll for results
+        let attempts = 0;
+        const maxAttempts = 200; // 200 * 3s = 10 minutes max
+
+        while (attempts < maxAttempts) {
+            await sleep(3000);
+            attempts++;
+
+            // Animate progress bar (30% → 90%)
+            const progress = 30 + Math.min(60, attempts * 2);
+            if (progressEl) progressEl.style.width = `${progress}%`;
+
+            if (statusEl) {
+                const dots = '.'.repeat((attempts % 3) + 1);
+                statusEl.textContent = `Gemini AI is analyzing PDFs and identifying candidates${dots}`;
+            }
+
+            try {
+                const pollResp = await fetch(`/job/${jobId}`);
+                const pollData = await pollResp.json();
+
+                if (pollData.status === 'done') {
+                    allResults = pollData.extracted || [];
+                    allErrors = pollData.errors || [];
+                    break;
+                } else if (pollData.status === 'error') {
+                    allErrors = pollData.errors || [{ file: 'Processing', error: 'Unknown error' }];
+                    break;
+                }
+                // else: still processing, keep polling
+            } catch (pollErr) {
+                // Network blip — retry silently
+                console.warn('Poll error, retrying...', pollErr);
+            }
+        }
+
+        if (attempts >= maxAttempts) {
+            allErrors.push({ file: 'Processing', error: 'Timed out after 10 minutes.' });
+        }
+
     } catch (err) {
-        if (err.name === 'AbortError') {
-            allErrors.push({ file: 'Processing', error: 'Request timed out (>10 min). Try uploading fewer files.' });
-        } else {
-            allErrors.push({ file: 'Processing', error: `Network error: ${err.message}` });
+        if (allErrors.length === 0) {
+            allErrors.push({ file: 'Processing', error: `Error: ${err.message}` });
         }
     }
 
