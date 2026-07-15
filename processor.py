@@ -195,6 +195,8 @@ def extract_candidate_details(pdf_paths: list) -> list:
     contents = [PROMPT_TEMPLATE]
     uploaded_files = []
 
+    import time
+
     for path in pdf_paths:
         fname = os.path.basename(path)
         # 1. Keep text for python fallback
@@ -205,11 +207,27 @@ def extract_candidate_details(pdf_paths: list) -> list:
         try:
             print(f"[GEMINI] Uploading {fname} for native OCR...")
             g_file = client.files.upload(file=path, config={'display_name': fname})
+            
+            # Wait for file to be processed (Active)
+            print(f"[GEMINI] Waiting for {fname} to be processed by File API...")
+            while True:
+                file_status = client.files.get(name=g_file.name)
+                state_str = str(file_status.state)
+                # State can be 'State.ACTIVE', 'State.PROCESSING', 'ACTIVE', etc.
+                if "ACTIVE" in state_str:
+                    print(f"[GEMINI] {fname} is ACTIVE.")
+                    break
+                elif "FAILED" in state_str:
+                    raise RuntimeError(f"Gemini file processing failed for {fname}")
+                else:
+                    print(f"[GEMINI] {fname} state: {state_str}. Waiting 2s...")
+                    time.sleep(2)
+            
             uploaded_files.append(g_file)
             contents.append(f"--- Document: {fname} ---")
             contents.append(g_file)
         except Exception as e:
-            print(f"[GEMINI ERROR] Failed to upload {fname}: {e}")
+            print(f"[GEMINI ERROR] Failed to upload/process {fname}: {e}")
             contents.append(f"--- Document: {fname} ---\n{doc_text}")
 
     try:
