@@ -760,3 +760,101 @@ body {
         padding: 40px 20px;
     }
 }
+
+/* ---- Multi-Candidate Slot Styles ---- */
+
+.candidate-slot {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    margin-bottom: 16px;
+    transition: var(--transition);
+}
+
+.candidate-slot:hover {
+    border-color: var(--border-hover);
+    box-shadow: var(--shadow);
+}
+
+.candidate-slot-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.candidate-slot-header .material-icons-round {
+    color: var(--accent-light);
+    font-size: 22px;
+}
+
+.candidate-name-input {
+    flex: 1;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-family: 'Inter', sans-serif;
+    font-size: 0.95rem;
+    font-weight: 600;
+    padding: 8px 14px;
+    outline: none;
+    transition: var(--transition);
+}
+
+.candidate-name-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.candidate-drop-zone {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 18px 20px;
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    transition: var(--transition);
+    margin-bottom: 12px;
+}
+
+.candidate-drop-zone:hover,
+.candidate-drop-zone.drag-over {
+    border-color: var(--accent);
+    background: var(--accent-glow);
+    color: var(--accent-light);
+}
+
+.candidate-drop-zone .material-icons-round {
+    font-size: 24px;
+    color: var(--accent);
+}
+
+.candidate-file-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.btn-outline {
+    background: transparent;
+    border: 2px dashed var(--border);
+    color: var(--accent-light);
+    width: 100%;
+    justify-content: center;
+    padding: 16px;
+    font-size: 1rem;
+    transition: var(--transition);
+    border-radius: var(--radius);
+    margin-bottom: 16px;
+}
+
+.btn-outline:hover {
+    border-color: var(--accent);
+    background: var(--accent-glow);
+}
+

@@ -1,11 +1,7 @@
 // ============================================
-// RecruitAI - Frontend Logic
+// RecruitAI - Frontend Logic (Multi-Candidate)
 // ============================================
 
-const dropZone = document.getElementById('dropZone');
-const fileInput = document.getElementById('fileInput');
-const fileList = document.getElementById('fileList');
-const fileItems = document.getElementById('fileItems');
 const actionBar = document.getElementById('actionBar');
 const processingOverlay = document.getElementById('processingOverlay');
 const resultsSection = document.getElementById('resultsSection');
@@ -15,116 +11,135 @@ const errorsPanel = document.getElementById('errorsPanel');
 const errorsList = document.getElementById('errorsList');
 const trackerSection = document.getElementById('trackerSection');
 
-let selectedFiles = [];
+// Each entry: { name: 'Candidate 1', files: [File, File, ...] }
+let candidates = [];
 
-// --- Drag & Drop Handlers ---
-dropZone.addEventListener('click', () => fileInput.click());
+// ---- Candidate Slot Management ----
 
-dropZone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    dropZone.classList.add('drag-over');
-});
-
-dropZone.addEventListener('dragleave', () => {
-    dropZone.classList.remove('drag-over');
-});
-
-dropZone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    dropZone.classList.remove('drag-over');
-    handleFiles(e.dataTransfer.files);
-});
-
-fileInput.addEventListener('change', (e) => {
-    handleFiles(e.target.files);
-});
-
-function handleFiles(files) {
-    const newFiles = Array.from(files).filter(f => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'));
-    
-    if (newFiles.length === 0) {
-        showToast('Please select valid PDF files only', 'error');
-        return;
-    }
-
-    selectedFiles = [...selectedFiles, ...newFiles];
-    renderFileList();
+function addCandidateSlot() {
+    const index = candidates.length;
+    candidates.push({ name: `Candidate ${index + 1}`, files: [] });
+    renderCandidateQueue();
+    document.getElementById('actionBar').style.display = 'block';
 }
 
-function renderFileList() {
-    if (selectedFiles.length === 0) {
-        fileList.style.display = 'none';
-        actionBar.style.display = 'none';
-        return;
+function removeCandidateSlot(index) {
+    candidates.splice(index, 1);
+    renderCandidateQueue();
+    if (candidates.length === 0) {
+        document.getElementById('actionBar').style.display = 'none';
     }
+}
 
-    fileList.style.display = 'block';
-    actionBar.style.display = 'block';
-    fileItems.innerHTML = '';
+function handleCandidateFiles(index, filesInput) {
+    const newFiles = Array.from(filesInput).filter(f => f.name.toLowerCase().endsWith('.pdf'));
+    candidates[index].files = [...candidates[index].files, ...newFiles];
+    renderCandidateQueue();
+}
 
-    selectedFiles.forEach((file, index) => {
-        const size = (file.size / (1024 * 1024)).toFixed(2); // MB
-        
-        const item = document.createElement('div');
-        item.className = 'file-item';
-        item.innerHTML = `
-            <span class="material-icons-round">picture_as_pdf</span>
-            <div class="file-item-info">
-                <div class="file-item-name">${file.name}</div>
-                <div class="file-item-size">${size} MB</div>
+function removeCandidateFile(candidateIndex, fileIndex) {
+    candidates[candidateIndex].files.splice(fileIndex, 1);
+    renderCandidateQueue();
+}
+
+function renderCandidateQueue() {
+    const queue = document.getElementById('candidateQueue');
+    queue.innerHTML = '';
+
+    candidates.forEach((candidate, cIdx) => {
+        const card = document.createElement('div');
+        card.className = 'candidate-slot';
+        card.innerHTML = `
+            <div class="candidate-slot-header">
+                <span class="material-icons-round">person</span>
+                <input class="candidate-name-input" type="text" value="${candidate.name}"
+                    onchange="candidates[${cIdx}].name = this.value"
+                    placeholder="Candidate Name (optional)" />
+                <button class="btn btn-sm btn-danger" onclick="removeCandidateSlot(${cIdx})">
+                    <span class="material-icons-round">delete</span>
+                </button>
             </div>
-            <button class="file-item-remove" onclick="removeFile(${index})">
-                <span class="material-icons-round">close</span>
-            </button>
+            <div class="candidate-drop-zone" id="dropZone-${cIdx}"
+                onclick="document.getElementById('fileInput-${cIdx}').click()"
+                ondragover="event.preventDefault(); this.classList.add('drag-over')"
+                ondragleave="this.classList.remove('drag-over')"
+                ondrop="this.classList.remove('drag-over'); handleCandidateFiles(${cIdx}, event.dataTransfer.files)">
+                <span class="material-icons-round">cloud_upload</span>
+                <span>Drop PDFs here or click to browse</span>
+                <input type="file" id="fileInput-${cIdx}" multiple accept=".pdf" hidden
+                    onchange="handleCandidateFiles(${cIdx}, this.files)">
+            </div>
+            <div class="candidate-file-list" id="fileList-${cIdx}">
+                ${candidate.files.map((f, fIdx) => `
+                    <div class="file-item">
+                        <span class="material-icons-round">picture_as_pdf</span>
+                        <div class="file-item-info">
+                            <div class="file-item-name">${f.name}</div>
+                            <div class="file-item-size">${(f.size/1024/1024).toFixed(2)} MB</div>
+                        </div>
+                        <button class="file-item-remove" onclick="removeCandidateFile(${cIdx}, ${fIdx})">
+                            <span class="material-icons-round">close</span>
+                        </button>
+                    </div>
+                `).join('')}
+            </div>
         `;
-        fileItems.appendChild(item);
+        queue.appendChild(card);
     });
 }
 
-function removeFile(index) {
-    selectedFiles.splice(index, 1);
-    renderFileList();
-}
+// ---- Process All Candidates ----
 
-function clearFiles() {
-    selectedFiles = [];
-    fileInput.value = '';
-    renderFileList();
-}
+async function processAllCandidates() {
+    const validCandidates = candidates.filter(c => c.files.length > 0);
+    if (validCandidates.length === 0) {
+        showToast('Please add files for at least one candidate', 'error');
+        return;
+    }
 
-// --- Processing ---
-async function processFiles() {
-    if (selectedFiles.length === 0) return;
-
-    const formData = new FormData();
-    selectedFiles.forEach(file => formData.append('files', file));
-
-    // Show processing state
     processingOverlay.style.display = 'flex';
     resultsSection.style.display = 'none';
     trackerSection.style.display = 'none';
-    
-    try {
-        const response = await fetch('/upload', {
-            method: 'POST',
-            body: formData
-        });
 
-        const data = await response.json();
+    const allResults = [];
+    const allErrors = [];
 
-        if (response.ok) {
-            showToast('Processing complete!', 'success');
-            renderResults(data);
-            clearFiles(); // Reset upload state
-        } else {
-            showToast(data.error || 'Upload failed', 'error');
+    for (let i = 0; i < validCandidates.length; i++) {
+        const candidate = validCandidates[i];
+        const statusEl = document.getElementById('processingStatus');
+        if (statusEl) statusEl.textContent = `Processing ${candidate.name} (${i + 1} of ${validCandidates.length})...`;
+
+        const progressEl = document.getElementById('progressFill');
+        if (progressEl) progressEl.style.width = `${Math.round(((i) / validCandidates.length) * 100)}%`;
+
+        const formData = new FormData();
+        candidate.files.forEach(f => formData.append('files', f));
+
+        try {
+            const response = await fetch('/upload', { method: 'POST', body: formData });
+            const data = await response.json();
+            if (response.ok) {
+                allResults.push(...(data.extracted || []));
+                allErrors.push(...(data.errors || []));
+            } else {
+                allErrors.push({ file: candidate.name, error: data.error || 'Upload failed' });
+            }
+        } catch (err) {
+            allErrors.push({ file: candidate.name, error: `Network error: ${err.message}` });
         }
-    } catch (error) {
-        console.error('Error:', error);
-        showToast('An error occurred during processing', 'error');
-    } finally {
-        processingOverlay.style.display = 'none';
     }
+
+    if (document.getElementById('progressFill'))
+        document.getElementById('progressFill').style.width = '100%';
+
+    processingOverlay.style.display = 'none';
+    showToast(`Done! ${allResults.length} candidate(s) processed.`, 'success');
+    renderResults({ extracted: allResults, errors: allErrors, total_in_tracker: allResults.length });
+
+    // Reset
+    candidates = [];
+    renderCandidateQueue();
+    document.getElementById('actionBar').style.display = 'none';
 }
 
 function renderResults(data) {

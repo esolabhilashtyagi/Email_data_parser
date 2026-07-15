@@ -44,43 +44,24 @@
         <!-- Upload Section -->
         <section class="upload-section" id="uploadSection">
             <div class="section-header">
-                <h2><span class="material-icons-round">upload_file</span> Upload Resumes</h2>
-                <p>Drop PDF resumes and marksheets below. Gemini AI will extract all candidate details automatically.</p>
+                <h2><span class="material-icons-round">upload_file</span> Upload Candidates</h2>
+                <p>Add each candidate separately with their documents. Each candidate will get <strong>one row</strong> in the tracker.</p>
             </div>
 
-            <div class="drop-zone" id="dropZone">
-                <div class="drop-zone-content">
-                    <div class="drop-icon">
-                        <span class="material-icons-round">cloud_upload</span>
-                    </div>
-                    <h3>Drag & Drop PDFs Here</h3>
-                    <p>or click to browse files</p>
-                    <div class="supported-formats">
-                        <span class="badge">PDF</span>
-                        <span class="badge">Resume</span>
-                        <span class="badge">Marksheet</span>
-                        <span class="badge">Experience Letter</span>
-                    </div>
-                </div>
-                <input type="file" id="fileInput" multiple accept=".pdf" hidden>
-            </div>
+            <!-- Candidate Queue -->
+            <div id="candidateQueue"></div>
 
-            <!-- File list -->
-            <div class="file-list" id="fileList" style="display: none;">
-                <div class="file-list-header">
-                    <h3><span class="material-icons-round">description</span> Selected Files</h3>
-                    <button class="btn btn-sm btn-danger" onclick="clearFiles()">
-                        <span class="material-icons-round">delete</span> Clear All
-                    </button>
-                </div>
-                <div id="fileItems"></div>
-            </div>
+            <!-- Add Candidate Button -->
+            <button class="btn btn-outline btn-lg" id="btnAddCandidate" onclick="addCandidateSlot()">
+                <span class="material-icons-round">person_add</span>
+                Add Candidate
+            </button>
 
-            <!-- Process button -->
+            <!-- Process ALL button -->
             <div class="action-bar" id="actionBar" style="display: none;">
-                <button class="btn btn-primary btn-lg" id="btnProcess" onclick="processFiles()">
+                <button class="btn btn-primary btn-lg" id="btnProcess" onclick="processAllCandidates()">
                     <span class="material-icons-round">auto_awesome</span>
-                    Extract Data with Gemini AI
+                    Process All Candidates with Gemini AI
                 </button>
             </div>
         </section>
@@ -133,6 +114,6 @@
     <!-- Toast notifications -->
     <div class="toast-container" id="toastContainer"></div>
 
-    <script src="/static/script.js?v=4"></script>
+    <script src="/static/script.js?v=5"></script>
 </body>
 </html>
