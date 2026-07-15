@@ -93,27 +93,25 @@ def upload():
     results = []
     errors = []
 
+    # Save all uploaded PDFs first
     save_paths = []
-    file_names = []
-
     for file in files:
         if not file.filename.lower().endswith(".pdf"):
             errors.append({"file": file.filename, "error": "Not a PDF file"})
             continue
-
-        # Save uploaded file
         safe_name = f"{uuid.uuid4().hex[:8]}_{secure_filename(file.filename)}"
         save_path = os.path.join(UPLOAD_FOLDER, safe_name)
         file.save(save_path)
         save_paths.append(save_path)
-        file_names.append(file.filename)
 
+    # Send ALL PDFs to Gemini in one call — it identifies candidates and returns a list
     if save_paths:
-        serial = start_serial
         try:
-            raw_data = extract_candidate_details(save_paths)
-            flat = flatten_candidate(raw_data, serial, ", ".join(file_names))
-            results.append(flat)
+            candidates_list = extract_candidate_details(save_paths)
+            for i, raw_data in enumerate(candidates_list):
+                serial = start_serial + len(results)
+                flat = flatten_candidate(raw_data, serial, "")
+                results.append(flat)
         except Exception as e:
             errors.append({"file": "Batch Processing", "error": str(e)})
 

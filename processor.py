@@ -36,9 +36,16 @@ def pdf_to_text(pdf_path: str) -> str:
 
 PROMPT_TEMPLATE = '''
 You are an expert HR recruiter and document parser.
-You will receive text extracted from one or more documents belonging to a single candidate — this may include a CV/Resume, marksheets, experience letters, or any combination.
+You will receive text extracted from MULTIPLE documents that may belong to MULTIPLE different candidates.
+These could be CVs/Resumes, marksheets, experience letters, offer letters, etc.
 
-Your job is to scan ALL provided documents thoroughly and extract the candidate's information into the exact JSON structure below.
+STEP 1 - IDENTIFY CANDIDATES:
+- First, figure out how many DISTINCT candidates are present in the documents.
+- Group the documents by candidate. Use names, roll numbers, and content to determine which documents belong to which candidate.
+- A candidate's CV/resume, their marksheets, and their experience letters will typically share the same name.
+
+STEP 2 - EXTRACT DATA FOR EACH CANDIDATE:
+For each candidate, extract their information into the JSON structure shown below.
 
 RULES FOR MARKS & PERCENTAGES:
 1. Search every document for any mention of marks, grades, or percentages for each qualification level.
@@ -50,7 +57,7 @@ RULES FOR MARKS & PERCENTAGES:
 7. For 10th and 12th, look closely at board marksheets. The marks are often in a subject-wise table. Sum the marks if a total is not explicitly provided.
 
 RULES FOR EXPERIENCE:
-- Sum only full-time job durations from ALL documents (CV + experience letters).
+- Sum only full-time job durations from ALL documents (CV + experience letters) for that candidate.
 - Exclude internships unless explicitly labelled as full-time.
 - Format: "X years Y months". If fresher/no experience, use "".
 
@@ -67,53 +74,54 @@ RULES FOR DOCUMENT LINKS:
 - For resume_link: put the filename of the CV/Resume document.
 - If a single CV contains all data, use that filename for resume_link and leave marksheet_link empty.
 
-Return ONLY valid JSON. No markdown, no explanation, no extra text.
+Return ONLY a valid JSON ARRAY, even if there is only one candidate. No markdown, no explanation, no extra text.
 
-{
-  "serial_number": "",
-  "candidate_name": "",
-  "candidate_email": "",
-  "date_of_birth": "",
-  "mobile_number": "",
-  "gender": "",
-  "state": "",
-  "10th": {
-    "board": "",
-    "passing_year": "",
-    "marks": "",
-    "percentage": "",
-    "marksheet_link": ""
-  },
-  "12th": {
-    "board": "",
-    "passing_year": "",
-    "stream": "",
-    "marks": "",
-    "percentage": "",
-    "marksheet_link": ""
-  },
-  "graduation": {
-    "university": "",
-    "degree": "",
-    "passing_year": "",
-    "marks": "",
-    "percentage": "",
-    "marksheet_link": ""
-  },
-  "post_graduation": {
-    "university": "",
-    "degree": "",
-    "passing_year": "",
-    "marks": "",
-    "percentage": "",
-    "marksheet_link": ""
-  },
-  "experience": {
-    "total_years_months": "",
-    "experience_letter_link": ""
-  },
-  "resume_link": ""
-}
+[
+  {
+    "candidate_name": "",
+    "candidate_email": "",
+    "date_of_birth": "",
+    "mobile_number": "",
+    "gender": "",
+    "state": "",
+    "10th": {
+      "board": "",
+      "passing_year": "",
+      "marks": "",
+      "percentage": "",
+      "marksheet_link": ""
+    },
+    "12th": {
+      "board": "",
+      "passing_year": "",
+      "stream": "",
+      "marks": "",
+      "percentage": "",
+      "marksheet_link": ""
+    },
+    "graduation": {
+      "university": "",
+      "degree": "",
+      "passing_year": "",
+      "marks": "",
+      "percentage": "",
+      "marksheet_link": ""
+    },
+    "post_graduation": {
+      "university": "",
+      "degree": "",
+      "passing_year": "",
+      "marks": "",
+      "percentage": "",
+      "marksheet_link": ""
+    },
+    "experience": {
+      "total_years_months": "",
+      "experience_letter_link": ""
+    },
+    "resume_link": ""
+  }
+]
 
 --- CANDIDATE DOCUMENTS START BELOW ---
 '''
@@ -130,8 +138,8 @@ def calc_percent(s: str) -> str:
         return ""
 
 
-def extract_candidate_details(pdf_paths: list) -> dict:
-    """Full pipeline: PDF list -> combined text -> Gemini -> parsed dict with percentages."""
+def extract_candidate_details(pdf_paths: list) -> list:
+    """Full pipeline: PDF list -> combined text -> Gemini -> list of parsed candidate dicts."""
     raw_text = ""
     contents = [PROMPT_TEMPLATE]
     uploaded_files = []
@@ -151,7 +159,6 @@ def extract_candidate_details(pdf_paths: list) -> dict:
             contents.append(g_file)
         except Exception as e:
             print(f"[GEMINI ERROR] Failed to upload {fname}: {e}")
-            # If upload fails, just pass the extracted text (if any)
             contents.append(f"--- Document: {fname} ---\n{doc_text}")
 
     try:
@@ -161,11 +168,10 @@ def extract_candidate_details(pdf_paths: list) -> dict:
             config=types.GenerateContentConfig(
                 temperature=0.0,
                 top_p=1,
-                max_output_tokens=8192,
+                max_output_tokens=16384,
             ),
         )
     finally:
-        # Cleanup uploaded files from Gemini storage
         for f in uploaded_files:
             try:
                 client.files.delete(name=f.name)
@@ -173,7 +179,6 @@ def extract_candidate_details(pdf_paths: list) -> dict:
                 print(f"[GEMINI WARNING] Could not delete {f.name}: {e}")
 
     response_text = response.text.strip()
-    # Strip markdown code fences if Gemini adds them
     response_text = re.sub(r"^```json\s*", "", response_text, flags=re.I)
     response_text = re.sub(r"\s*```$", "", response_text)
     try:
@@ -183,16 +188,15 @@ def extract_candidate_details(pdf_paths: list) -> dict:
             f"Failed to parse Gemini JSON.\nRaw output:\n{response.text}"
         ) from exc
 
-    # -------------------------------------------------------
-    # DEBUG: print what AI returned for PG
-    # -------------------------------------------------------
-    pg = data.get("post_graduation", {})
-    print(f"[DEBUG] PG from AI: marks='{pg.get('marks')}' | pct='{pg.get('percentage')}' | degree='{pg.get('degree')}'")
+    # Ensure we always have a list
+    if isinstance(data, dict):
+        data = [data]
 
+    print(f"[GEMINI] Identified {len(data)} candidate(s) from {len(pdf_paths)} PDF(s)")
 
     # -------------------------------------------------------
-    # Python fallback: if AI left marks/percentage empty,
-    # try to find patterns in the raw PDF text per level
+    # Python fallback per candidate: if AI left marks/percentage
+    # empty, try to find patterns in the raw PDF text
     # -------------------------------------------------------
     LEVEL_KEYWORDS = {
         "10th":            ["10th", "matriculat", "secondary", "ssc", "class x", "class 10", "x board"],
@@ -200,39 +204,37 @@ def extract_candidate_details(pdf_paths: list) -> dict:
         "graduation":      ["bachelor", "b.tech", "b.sc", "b.com", "b.a.", "graduation", "undergrad", "bca", "bba"],
         "post_graduation": ["master", "m.tech", "m.sc", "m.com", "m.a.", "mba", "mca", "post graduation", "post-graduation", "postgrad", "pg semester"],
     }
-    for level, keywords in LEVEL_KEYWORDS.items():
-        if level not in data:
-            continue
-        entry = data[level]
-        if not entry.get("marks"):
-            for kw in keywords:
-                idx = raw_text.lower().find(kw.lower())
-                if idx == -1:
-                    continue
-                snippet = raw_text[max(0, idx - 100):idx + 1500]
-                # Match only realistic mark patterns: both numbers <= 5 digits,
-                # obtained <= total, and total <= 2000 (avoids roll/phone numbers)
-                for m in re.finditer(
-                    r"(\d{1,4}(?:\.\d+)?)\s*(?:/|out\s+of)\s*(\d{1,4}(?:\.\d+)?)",
-                    snippet, re.I
-                ):
-                    obtained = float(m.group(1))
-                    total = float(m.group(2))
-                    if total <= 0 or total > 2000:
+    for candidate in data:
+        for level, keywords in LEVEL_KEYWORDS.items():
+            if level not in candidate:
+                continue
+            entry = candidate[level]
+            if not entry.get("marks"):
+                for kw in keywords:
+                    idx = raw_text.lower().find(kw.lower())
+                    if idx == -1:
                         continue
-                    if obtained > total:
-                        continue
-                    if obtained < 10:   # Skip tiny numbers (page numbers, etc.)
-                        continue
-                    entry["marks"] = f"{m.group(1)}/{m.group(2)}"
-                    print(f"[FALLBACK] {level} marks via '{kw}': {entry['marks']}")
-                    break
-                if entry.get("marks"):
-                    break
-        if entry.get("marks") and not entry.get("percentage"):
-            entry["percentage"] = calc_percent(entry["marks"])
-            print(f"[FALLBACK] {level} pct computed: {entry['percentage']}")
-
+                    snippet = raw_text[max(0, idx - 100):idx + 1500]
+                    for m in re.finditer(
+                        r"(\d{1,4}(?:\.\d+)?)\s*(?:/|out\s+of)\s*(\d{1,4}(?:\.\d+)?)",
+                        snippet, re.I
+                    ):
+                        obtained = float(m.group(1))
+                        total = float(m.group(2))
+                        if total <= 0 or total > 2000:
+                            continue
+                        if obtained > total:
+                            continue
+                        if obtained < 10:
+                            continue
+                        entry["marks"] = f"{m.group(1)}/{m.group(2)}"
+                        print(f"[FALLBACK] {candidate.get('candidate_name','')} {level} marks via '{kw}': {entry['marks']}")
+                        break
+                    if entry.get("marks"):
+                        break
+            if entry.get("marks") and not entry.get("percentage"):
+                entry["percentage"] = calc_percent(entry["marks"])
+                print(f"[FALLBACK] {candidate.get('candidate_name','')} {level} pct computed: {entry['percentage']}")
 
     return data
 

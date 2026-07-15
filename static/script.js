@@ -1,7 +1,11 @@
 // ============================================
-// RecruitAI - Frontend Logic (Multi-Candidate)
+// RecruitAI - Bulk Upload Frontend Logic
 // ============================================
 
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+const fileList = document.getElementById('fileList');
+const fileItems = document.getElementById('fileItems');
 const actionBar = document.getElementById('actionBar');
 const processingOverlay = document.getElementById('processingOverlay');
 const resultsSection = document.getElementById('resultsSection');
@@ -11,152 +15,166 @@ const errorsPanel = document.getElementById('errorsPanel');
 const errorsList = document.getElementById('errorsList');
 const trackerSection = document.getElementById('trackerSection');
 
-// Each entry: { name: 'Candidate 1', files: [File, File, ...] }
-let candidates = [];
+let selectedFiles = [];
 
-// ---- Candidate Slot Management ----
+// ---- Drop Zone Events ----
 
-function addCandidateSlot() {
-    const index = candidates.length;
-    candidates.push({ name: `Candidate ${index + 1}`, files: [] });
-    renderCandidateQueue();
-    document.getElementById('actionBar').style.display = 'block';
-}
+dropZone.addEventListener('click', () => fileInput.click());
 
-function removeCandidateSlot(index) {
-    candidates.splice(index, 1);
-    renderCandidateQueue();
-    if (candidates.length === 0) {
-        document.getElementById('actionBar').style.display = 'none';
-    }
-}
+dropZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dropZone.classList.add('drag-over');
+});
 
-function handleCandidateFiles(index, filesInput) {
-    const newFiles = Array.from(filesInput).filter(f => f.name.toLowerCase().endsWith('.pdf'));
-    candidates[index].files = [...candidates[index].files, ...newFiles];
-    renderCandidateQueue();
-}
+dropZone.addEventListener('dragleave', () => {
+    dropZone.classList.remove('drag-over');
+});
 
-function removeCandidateFile(candidateIndex, fileIndex) {
-    candidates[candidateIndex].files.splice(fileIndex, 1);
-    renderCandidateQueue();
-}
+dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    const files = Array.from(e.dataTransfer.files).filter(f => f.name.toLowerCase().endsWith('.pdf'));
+    addFiles(files);
+});
 
-function renderCandidateQueue() {
-    const queue = document.getElementById('candidateQueue');
-    queue.innerHTML = '';
+fileInput.addEventListener('change', () => {
+    const files = Array.from(fileInput.files).filter(f => f.name.toLowerCase().endsWith('.pdf'));
+    addFiles(files);
+    fileInput.value = ''; // reset so same file can be re-added
+});
 
-    candidates.forEach((candidate, cIdx) => {
-        const card = document.createElement('div');
-        card.className = 'candidate-slot';
-        card.innerHTML = `
-            <div class="candidate-slot-header">
-                <span class="material-icons-round">person</span>
-                <input class="candidate-name-input" type="text" value="${candidate.name}"
-                    onchange="candidates[${cIdx}].name = this.value"
-                    placeholder="Candidate Name (optional)" />
-                <button class="btn btn-sm btn-danger" onclick="removeCandidateSlot(${cIdx})">
-                    <span class="material-icons-round">delete</span>
-                </button>
-            </div>
-            <div class="candidate-drop-zone" id="dropZone-${cIdx}"
-                onclick="document.getElementById('fileInput-${cIdx}').click()"
-                ondragover="event.preventDefault(); this.classList.add('drag-over')"
-                ondragleave="this.classList.remove('drag-over')"
-                ondrop="this.classList.remove('drag-over'); handleCandidateFiles(${cIdx}, event.dataTransfer.files)">
-                <span class="material-icons-round">cloud_upload</span>
-                <span>Drop PDFs here or click to browse</span>
-                <input type="file" id="fileInput-${cIdx}" multiple accept=".pdf" hidden
-                    onchange="handleCandidateFiles(${cIdx}, this.files)">
-            </div>
-            <div class="candidate-file-list" id="fileList-${cIdx}">
-                ${candidate.files.map((f, fIdx) => `
-                    <div class="file-item">
-                        <span class="material-icons-round">picture_as_pdf</span>
-                        <div class="file-item-info">
-                            <div class="file-item-name">${f.name}</div>
-                            <div class="file-item-size">${(f.size/1024/1024).toFixed(2)} MB</div>
-                        </div>
-                        <button class="file-item-remove" onclick="removeCandidateFile(${cIdx}, ${fIdx})">
-                            <span class="material-icons-round">close</span>
-                        </button>
-                    </div>
-                `).join('')}
-            </div>
-        `;
-        queue.appendChild(card);
+// ---- File Management ----
+
+function addFiles(newFiles) {
+    // Avoid duplicates by name
+    newFiles.forEach(f => {
+        if (!selectedFiles.find(sf => sf.name === f.name)) {
+            selectedFiles.push(f);
+        }
     });
+    renderFileList();
 }
 
-// ---- Process All Candidates ----
+function removeFile(index) {
+    selectedFiles.splice(index, 1);
+    renderFileList();
+}
 
-async function processAllCandidates() {
-    const validCandidates = candidates.filter(c => c.files.length > 0);
-    if (validCandidates.length === 0) {
-        showToast('Please add files for at least one candidate', 'error');
+function clearFiles() {
+    selectedFiles = [];
+    renderFileList();
+}
+
+function renderFileList() {
+    if (selectedFiles.length === 0) {
+        fileList.style.display = 'none';
+        actionBar.style.display = 'none';
+        return;
+    }
+
+    fileList.style.display = 'block';
+    actionBar.style.display = 'block';
+
+    fileItems.innerHTML = selectedFiles.map((f, i) => `
+        <div class="file-item">
+            <span class="material-icons-round">picture_as_pdf</span>
+            <div class="file-item-info">
+                <div class="file-item-name">${f.name}</div>
+                <div class="file-item-size">${(f.size / 1024 / 1024).toFixed(2)} MB</div>
+            </div>
+            <button class="file-item-remove" onclick="removeFile(${i})">
+                <span class="material-icons-round">close</span>
+            </button>
+        </div>
+    `).join('');
+}
+
+// ---- Process Files ----
+// Send ALL files in one request. Gemini identifies candidates automatically.
+
+async function processFiles() {
+    if (selectedFiles.length === 0) {
+        showToast('Please select at least one PDF file', 'error');
         return;
     }
 
     processingOverlay.style.display = 'flex';
     resultsSection.style.display = 'none';
     trackerSection.style.display = 'none';
+    errorsPanel.style.display = 'none';
 
-    const allResults = [];
-    const allErrors = [];
+    const statusEl = document.getElementById('processingStatus');
+    if (statusEl) statusEl.textContent = `Uploading ${selectedFiles.length} file(s) and analyzing with Gemini AI...`;
 
-    for (let i = 0; i < validCandidates.length; i++) {
-        const candidate = validCandidates[i];
-        const statusEl = document.getElementById('processingStatus');
-        if (statusEl) statusEl.textContent = `Processing ${candidate.name} (${i + 1} of ${validCandidates.length})...`;
+    const progressEl = document.getElementById('progressFill');
+    if (progressEl) progressEl.style.width = '30%';
 
-        const progressEl = document.getElementById('progressFill');
-        if (progressEl) progressEl.style.width = `${Math.round(((i) / validCandidates.length) * 100)}%`;
+    const formData = new FormData();
+    selectedFiles.forEach(f => formData.append('files', f));
 
-        const formData = new FormData();
-        candidate.files.forEach(f => formData.append('files', f));
+    let allResults = [];
+    let allErrors = [];
 
-        try {
-            const response = await fetch('/upload', { method: 'POST', body: formData });
-            const data = await response.json();
-            if (response.ok) {
-                allResults.push(...(data.extracted || []));
-                allErrors.push(...(data.errors || []));
-            } else {
-                allErrors.push({ file: candidate.name, error: data.error || 'Upload failed' });
-            }
-        } catch (err) {
-            allErrors.push({ file: candidate.name, error: `Network error: ${err.message}` });
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 600000); // 10 min timeout
+
+        if (statusEl) statusEl.textContent = `Gemini AI is reading ${selectedFiles.length} PDF(s) and identifying candidates...`;
+        if (progressEl) progressEl.style.width = '50%';
+
+        const response = await fetch('/upload', {
+            method: 'POST',
+            body: formData,
+            signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
+        if (progressEl) progressEl.style.width = '90%';
+
+        const data = await response.json();
+        if (response.ok) {
+            allResults = data.extracted || [];
+            allErrors = data.errors || [];
+        } else {
+            allErrors.push({ file: 'Upload', error: data.error || 'Upload failed' });
+        }
+    } catch (err) {
+        if (err.name === 'AbortError') {
+            allErrors.push({ file: 'Processing', error: 'Request timed out (>10 min). Try uploading fewer files.' });
+        } else {
+            allErrors.push({ file: 'Processing', error: `Network error: ${err.message}` });
         }
     }
 
-    if (document.getElementById('progressFill'))
-        document.getElementById('progressFill').style.width = '100%';
+    if (progressEl) progressEl.style.width = '100%';
 
     processingOverlay.style.display = 'none';
-    showToast(`Done! ${allResults.length} candidate(s) processed.`, 'success');
+    showToast(`Done! ${allResults.length} candidate(s) extracted from ${selectedFiles.length} files.`, 'success');
     renderResults({ extracted: allResults, errors: allErrors, total_in_tracker: allResults.length });
 
     // Reset
-    candidates = [];
-    renderCandidateQueue();
-    document.getElementById('actionBar').style.display = 'none';
+    selectedFiles = [];
+    renderFileList();
 }
+
+
+
+// ---- Render Results ----
 
 function renderResults(data) {
     resultsSection.style.display = 'block';
     resultsGrid.innerHTML = '';
-    
+
     const count = data.extracted ? data.extracted.length : 0;
     resultsSummary.innerText = `Successfully extracted data for ${count} candidate${count !== 1 ? 's' : ''}. Total in tracker: ${data.total_in_tracker || 0}`;
 
     if (data.extracted && data.extracted.length > 0) {
         data.extracted.forEach(candidate => {
             const initials = (candidate['Candidate Name'] || '??').substring(0, 2).toUpperCase();
-            
+
             const card = document.createElement('div');
             card.className = 'result-card';
-            
-            // Build the card HTML based on flattened keys from app.py
+
             card.innerHTML = `
                 <div class="result-card-header">
                     <div class="candidate-avatar">${initials}</div>
@@ -172,51 +190,46 @@ function renderResults(data) {
                         <div class="detail-row"><span class="detail-label">Date of Birth</span><span class="detail-value">${candidate['Date of Birth'] || '-'}</span></div>
                         <div class="detail-row"><span class="detail-label">State</span><span class="detail-value">${candidate['State'] || '-'}</span></div>
                     </div>
-                    
+
                     <div class="detail-group">
-                        <div class="detail-group-title"><span class="material-icons-round" style="font-size:14px">school</span> 10th Qualification Details</div>
-                        <div class="detail-row"><span class="detail-label">Board Name</span><span class="detail-value">${candidate['10th Board'] || '-'}</span></div>
+                        <div class="detail-group-title"><span class="material-icons-round" style="font-size:14px">school</span> 10th Details</div>
+                        <div class="detail-row"><span class="detail-label">Board</span><span class="detail-value">${candidate['10th Board'] || '-'}</span></div>
                         <div class="detail-row"><span class="detail-label">Passing Year</span><span class="detail-value">${candidate['10th Passing Year'] || '-'}</span></div>
                         <div class="detail-row"><span class="detail-label">Marks</span><span class="detail-value">${candidate['10th Marks'] || '-'}</span></div>
                         <div class="detail-row"><span class="detail-label">Percentage</span><span class="detail-value highlight">${candidate['10th Percentage'] ? candidate['10th Percentage'] + '%' : '-'}</span></div>
-                        <div class="detail-row"><span class="detail-label">10th Marksheet (Link)</span><span class="detail-value">${candidate['10th Marksheet (attachment)'] || '-'}</span></div>
                     </div>
 
                     <div class="detail-group">
-                        <div class="detail-group-title"><span class="material-icons-round" style="font-size:14px">school</span> 12th Qualification Details</div>
-                        <div class="detail-row"><span class="detail-label">Board Name</span><span class="detail-value">${candidate['12th Board'] || '-'}</span></div>
-                        <div class="detail-row"><span class="detail-label">Subject/Stream</span><span class="detail-value">${candidate['12th Stream'] || '-'}</span></div>
+                        <div class="detail-group-title"><span class="material-icons-round" style="font-size:14px">school</span> 12th Details</div>
+                        <div class="detail-row"><span class="detail-label">Board</span><span class="detail-value">${candidate['12th Board'] || '-'}</span></div>
+                        <div class="detail-row"><span class="detail-label">Stream</span><span class="detail-value">${candidate['12th Stream'] || '-'}</span></div>
                         <div class="detail-row"><span class="detail-label">Passing Year</span><span class="detail-value">${candidate['12th Passing Year'] || '-'}</span></div>
                         <div class="detail-row"><span class="detail-label">Marks</span><span class="detail-value">${candidate['12th Marks'] || '-'}</span></div>
                         <div class="detail-row"><span class="detail-label">Percentage</span><span class="detail-value highlight">${candidate['12th Percentage'] ? candidate['12th Percentage'] + '%' : '-'}</span></div>
-                        <div class="detail-row"><span class="detail-label">12th Marksheet (Link)</span><span class="detail-value">${candidate['12th Marksheet (attachment)'] || '-'}</span></div>
                     </div>
 
                     <div class="detail-group">
                         <div class="detail-group-title"><span class="material-icons-round" style="font-size:14px">school</span> Graduation Details</div>
-                        <div class="detail-row"><span class="detail-label">University/Board Name</span><span class="detail-value">${candidate['Graduation University'] || '-'}</span></div>
-                        <div class="detail-row"><span class="detail-label">Qualifying Degree</span><span class="detail-value">${candidate['Graduation Degree'] || '-'}</span></div>
+                        <div class="detail-row"><span class="detail-label">University</span><span class="detail-value">${candidate['Graduation University'] || '-'}</span></div>
+                        <div class="detail-row"><span class="detail-label">Degree</span><span class="detail-value">${candidate['Graduation Degree'] || '-'}</span></div>
                         <div class="detail-row"><span class="detail-label">Passing Year</span><span class="detail-value">${candidate['Graduation Passing Year'] || '-'}</span></div>
                         <div class="detail-row"><span class="detail-label">Marks</span><span class="detail-value">${candidate['Graduation Marks'] || '-'}</span></div>
                         <div class="detail-row"><span class="detail-label">Percentage</span><span class="detail-value highlight">${candidate['Graduation Percentage'] ? candidate['Graduation Percentage'] + '%' : '-'}</span></div>
-                        <div class="detail-row"><span class="detail-label">Grad. Marksheet (Link)</span><span class="detail-value">${candidate['Graduation Marksheet (attachment)'] || '-'}</span></div>
                     </div>
 
                     <div class="detail-group">
                         <div class="detail-group-title"><span class="material-icons-round" style="font-size:14px">school</span> Post-Graduation Details</div>
-                        <div class="detail-row"><span class="detail-label">University/Board Name</span><span class="detail-value">${candidate['PG University'] || '-'}</span></div>
-                        <div class="detail-row"><span class="detail-label">Qualifying Degree</span><span class="detail-value">${candidate['PG Degree'] || '-'}</span></div>
+                        <div class="detail-row"><span class="detail-label">University</span><span class="detail-value">${candidate['PG University'] || '-'}</span></div>
+                        <div class="detail-row"><span class="detail-label">Degree</span><span class="detail-value">${candidate['PG Degree'] || '-'}</span></div>
                         <div class="detail-row"><span class="detail-label">Passing Year</span><span class="detail-value">${candidate['PG Passing Year'] || '-'}</span></div>
                         <div class="detail-row"><span class="detail-label">PG Marks</span><span class="detail-value">${candidate['PG Marks'] || '-'}</span></div>
                         <div class="detail-row"><span class="detail-label">PG Percentage</span><span class="detail-value highlight">${candidate['PG Percentage'] ? candidate['PG Percentage'] + '%' : '-'}</span></div>
-                        <div class="detail-row"><span class="detail-label">PG Marksheet (Link)</span><span class="detail-value">${candidate['PG Marksheet (attachment)'] || '-'}</span></div>
                     </div>
-                    
+
                     <div class="detail-group">
                         <div class="detail-group-title"><span class="material-icons-round" style="font-size:14px">work</span> Experience & Resume</div>
                         <div class="detail-row"><span class="detail-label">Total Experience</span><span class="detail-value highlight">${candidate['Total Experience'] || '-'}</span></div>
-                        <div class="detail-row"><span class="detail-label">Exp. Letter (Link)</span><span class="detail-value">${candidate['Experience Letter (attachment)'] || '-'}</span></div>
-                        <div class="detail-row"><span class="detail-label">CV/Resume (Link)</span><span class="detail-value highlight">${candidate['Resume (attachment)'] || '-'}</span></div>
+                        <div class="detail-row"><span class="detail-label">CV/Resume</span><span class="detail-value highlight">${candidate['Resume (attachment)'] || '-'}</span></div>
                     </div>
                 </div>
             `;
@@ -224,10 +237,9 @@ function renderResults(data) {
         });
     }
 
-    // Handle Errors
     if (data.errors && data.errors.length > 0) {
         errorsPanel.style.display = 'block';
-        errorsList.innerHTML = data.errors.map(err => 
+        errorsList.innerHTML = data.errors.map(err =>
             `<div class="error-item"><strong>${err.file}</strong>: ${err.error}</div>`
         ).join('');
     } else {
@@ -235,15 +247,16 @@ function renderResults(data) {
     }
 }
 
-// --- Tracker ---
+// ---- Tracker ----
+
 async function loadTracker() {
     try {
         const response = await fetch('/tracker');
         const data = await response.json();
-        
+
         if (data.data && data.data.length > 0) {
             renderTrackerTable(data.data);
-            resultsSection.style.display = 'none'; // Hide results if showing tracker
+            resultsSection.style.display = 'none';
         } else {
             showToast('Tracker is currently empty', 'info');
         }
@@ -258,15 +271,13 @@ function renderTrackerTable(dataArray) {
     const thead = document.getElementById('trackerHead');
     const tbody = document.getElementById('trackerBody');
     const summary = document.getElementById('trackerSummary');
-    
+
     thead.innerHTML = '';
     tbody.innerHTML = '';
     summary.innerText = `Showing ${dataArray.length} recorded candidates.`;
 
-    // Extract headers from first object keys
     const headers = Object.keys(dataArray[0]);
-    
-    // Build Header
+
     const trHead = document.createElement('tr');
     headers.forEach(h => {
         const th = document.createElement('th');
@@ -275,7 +286,6 @@ function renderTrackerTable(dataArray) {
     });
     thead.appendChild(trHead);
 
-    // Build Rows
     dataArray.forEach(row => {
         const tr = document.createElement('tr');
         headers.forEach(h => {
@@ -285,8 +295,7 @@ function renderTrackerTable(dataArray) {
         });
         tbody.appendChild(tr);
     });
-    
-    // Scroll to tracker
+
     trackerSection.scrollIntoView({ behavior: 'smooth' });
 }
 
@@ -294,12 +303,13 @@ function downloadCSV() {
     window.location.href = '/download';
 }
 
-// --- Toast Notifications ---
+// ---- Toast Notifications ----
+
 function showToast(message, type = 'info') {
     const container = document.getElementById('toastContainer');
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
-    
+
     let icon = 'info';
     if (type === 'success') icon = 'check_circle';
     if (type === 'error') icon = 'error';
@@ -308,9 +318,9 @@ function showToast(message, type = 'info') {
         <span class="material-icons-round">${icon}</span>
         <span class="toast-text">${message}</span>
     `;
-    
+
     container.appendChild(toast);
-    
+
     setTimeout(() => {
         toast.style.opacity = '0';
         toast.style.transform = 'translateX(50px)';
@@ -318,3 +328,25 @@ function showToast(message, type = 'info') {
         setTimeout(() => toast.remove(), 300);
     }, 4000);
 }
+
+// ---- Background Particles ----
+(function initParticles() {
+    const container = document.getElementById('bgParticles');
+    if (!container) return;
+    for (let i = 0; i < 20; i++) {
+        const p = document.createElement('div');
+        p.className = 'particle';
+        p.style.cssText = `
+            position: absolute;
+            width: ${Math.random() * 6 + 2}px;
+            height: ${Math.random() * 6 + 2}px;
+            background: rgba(99,102,241,${Math.random() * 0.3 + 0.1});
+            border-radius: 50%;
+            left: ${Math.random() * 100}%;
+            top: ${Math.random() * 100}%;
+            animation: float ${Math.random() * 10 + 8}s ease-in-out infinite;
+            animation-delay: -${Math.random() * 10}s;
+        `;
+        container.appendChild(p);
+    }
+})();
