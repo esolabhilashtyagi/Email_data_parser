@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recruitment Data Extractor</title>
+    <meta name="description" content="AI-powered recruitment data extraction from resumes and marksheets using Gemini">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <!-- Animated background particles -->
+    <div class="bg-particles" id="bgParticles"></div>
+
+    <!-- Header -->
+    <header class="header">
+        <div class="header-inner">
+            <div class="logo">
+                <div class="logo-icon">
+                    <span class="material-icons-round">smart_toy</span>
+                </div>
+                <div>
+                    <h1>RecruitAI</h1>
+                    <p class="tagline">Gemini-Powered Resume Parser</p>
+                </div>
+            </div>
+            <div class="header-actions">
+                <button class="btn btn-ghost" id="btnViewTracker" onclick="loadTracker()">
+                    <span class="material-icons-round">table_chart</span>
+                    View Tracker
+                </button>
+                <button class="btn btn-ghost" id="btnDownload" onclick="downloadCSV()">
+                    <span class="material-icons-round">download</span>
+                    Download CSV
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main">
+
+        <!-- Upload Section -->
+        <section class="upload-section" id="uploadSection">
+            <div class="section-header">
+                <h2><span class="material-icons-round">upload_file</span> Upload Resumes</h2>
+                <p>Drop PDF resumes and marksheets below. Gemini AI will extract all candidate details automatically.</p>
+            </div>
+
+            <div class="drop-zone" id="dropZone">
+                <div class="drop-zone-content">
+                    <div class="drop-icon">
+                        <span class="material-icons-round">cloud_upload</span>
+                    </div>
+                    <h3>Drag & Drop PDFs Here</h3>
+                    <p>or click to browse files</p>
+                    <div class="supported-formats">
+                        <span class="badge">PDF</span>
+                        <span class="badge">Resume</span>
+                        <span class="badge">Marksheet</span>
+                        <span class="badge">Experience Letter</span>
+                    </div>
+                </div>
+                <input type="file" id="fileInput" multiple accept=".pdf" hidden>
+            </div>
+
+            <!-- File list -->
+            <div class="file-list" id="fileList" style="display: none;">
+                <div class="file-list-header">
+                    <h3><span class="material-icons-round">description</span> Selected Files</h3>
+                    <button class="btn btn-sm btn-danger" onclick="clearFiles()">
+                        <span class="material-icons-round">delete</span> Clear All
+                    </button>
+                </div>
+                <div id="fileItems"></div>
+            </div>
+
+            <!-- Process button -->
+            <div class="action-bar" id="actionBar" style="display: none;">
+                <button class="btn btn-primary btn-lg" id="btnProcess" onclick="processFiles()">
+                    <span class="material-icons-round">auto_awesome</span>
+                    Extract Data with Gemini AI
+                </button>
+            </div>
+        </section>
+
+        <!-- Processing Overlay -->
+        <div class="processing-overlay" id="processingOverlay" style="display: none;">
+            <div class="processing-card">
+                <div class="spinner"></div>
+                <h3>Processing with Gemini AI...</h3>
+                <p id="processingStatus">Reading PDFs and extracting candidate details</p>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Results Section -->
+        <section class="results-section" id="resultsSection" style="display: none;">
+            <div class="section-header">
+                <h2><span class="material-icons-round">check_circle</span> Extraction Results</h2>
+                <p id="resultsSummary"></p>
+            </div>
+
+            <!-- Result cards -->
+            <div class="results-grid" id="resultsGrid"></div>
+
+            <!-- Errors -->
+            <div class="errors-panel" id="errorsPanel" style="display: none;">
+                <h3><span class="material-icons-round">warning</span> Errors</h3>
+                <div id="errorsList"></div>
+            </div>
+        </section>
+
+        <!-- Tracker Table Section -->
+        <section class="tracker-section" id="trackerSection" style="display: none;">
+            <div class="section-header">
+                <h2><span class="material-icons-round">table_chart</span> Recruitment Tracker</h2>
+                <p id="trackerSummary"></p>
+            </div>
+            <div class="table-wrapper">
+                <table class="tracker-table" id="trackerTable">
+                    <thead id="trackerHead"></thead>
+                    <tbody id="trackerBody"></tbody>
+                </table>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Toast notifications -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="/static/script.js?v=4"></script>
+</body>
+</html>
