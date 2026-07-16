@@ -4,6 +4,8 @@
 
 const dropZone = document.getElementById('dropZone');
 const fileInput = document.getElementById('fileInput');
+const folderInput = document.getElementById('folderInput');
+const selectFolderLink = document.getElementById('selectFolderLink');
 const fileList = document.getElementById('fileList');
 const fileItems = document.getElementById('fileItems');
 const actionBar = document.getElementById('actionBar');
@@ -17,9 +19,59 @@ const trackerSection = document.getElementById('trackerSection');
 
 let selectedFiles = [];
 
+const ALLOWED_EXTS = ['.pdf', '.png', '.jpg', '.jpeg', '.webp'];
+
+function isSupportedFile(file) {
+    const ext = '.' + file.name.split('.').pop().toLowerCase();
+    return ALLOWED_EXTS.includes(ext);
+}
+
+// Recursive directory traversal for drag & drop
+async function traverseFileTree(item, path = "") {
+    if (item.isFile) {
+        const file = await new Promise((resolve) => item.file(resolve));
+        return [file];
+    } else if (item.isDirectory) {
+        const dirReader = item.createReader();
+        const entries = await new Promise((resolve) => {
+            const allEntries = [];
+            function readAll() {
+                dirReader.readEntries((results) => {
+                    if (results.length === 0) {
+                        resolve(allEntries);
+                    } else {
+                        allEntries.push(...results);
+                        readAll();
+                    }
+                }, () => resolve(allEntries));
+            }
+            readAll();
+        });
+        
+        const filePromises = entries.map(entry => traverseFileTree(entry, path + item.name + "/"));
+        const filesArrays = await Promise.all(filePromises);
+        return filesArrays.flat();
+    }
+    return [];
+}
+
 // ---- Drop Zone Events ----
 
-dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('click', (e) => {
+    // If they clicked on the "a folder" link specifically, open folder browser
+    if (e.target === selectFolderLink || selectFolderLink.contains(e.target)) {
+        e.stopPropagation();
+        folderInput.click();
+    } else {
+        fileInput.click();
+    }
+});
+
+selectFolderLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    folderInput.click();
+});
 
 dropZone.addEventListener('dragover', (e) => {
     e.preventDefault();
@@ -30,17 +82,33 @@ dropZone.addEventListener('dragleave', () => {
     dropZone.classList.remove('drag-over');
 });
 
-dropZone.addEventListener('drop', (e) => {
+dropZone.addEventListener('drop', async (e) => {
     e.preventDefault();
     dropZone.classList.remove('drag-over');
-    const files = Array.from(e.dataTransfer.files).filter(f => f.name.toLowerCase().endsWith('.pdf'));
-    addFiles(files);
+    
+    const items = Array.from(e.dataTransfer.items || []);
+    if (items.length > 0 && items[0].webkitGetAsEntry) {
+        const entries = items.map(item => item.webkitGetAsEntry()).filter(Boolean);
+        const filesPromises = entries.map(entry => traverseFileTree(entry));
+        const filesArrays = await Promise.all(filesPromises);
+        const allFiles = filesArrays.flat().filter(isSupportedFile);
+        addFiles(allFiles);
+    } else {
+        const files = Array.from(e.dataTransfer.files).filter(isSupportedFile);
+        addFiles(files);
+    }
 });
 
 fileInput.addEventListener('change', () => {
-    const files = Array.from(fileInput.files).filter(f => f.name.toLowerCase().endsWith('.pdf'));
+    const files = Array.from(fileInput.files).filter(isSupportedFile);
     addFiles(files);
     fileInput.value = ''; // reset so same file can be re-added
+});
+
+folderInput.addEventListener('change', () => {
+    const files = Array.from(folderInput.files).filter(isSupportedFile);
+    addFiles(files);
+    folderInput.value = ''; // reset
 });
 
 // ---- File Management ----
@@ -75,9 +143,12 @@ function renderFileList() {
     fileList.style.display = 'block';
     actionBar.style.display = 'block';
 
-    fileItems.innerHTML = selectedFiles.map((f, i) => `
+    fileItems.innerHTML = selectedFiles.map((f, i) => {
+        const ext = '.' + f.name.split('.').pop().toLowerCase();
+        const icon = ext === '.pdf' ? 'picture_as_pdf' : 'image';
+        return `
         <div class="file-item">
-            <span class="material-icons-round">picture_as_pdf</span>
+            <span class="material-icons-round">${icon}</span>
             <div class="file-item-info">
                 <div class="file-item-name">${f.name}</div>
                 <div class="file-item-size">${(f.size / 1024 / 1024).toFixed(2)} MB</div>
@@ -86,7 +157,8 @@ function renderFileList() {
                 <span class="material-icons-round">close</span>
             </button>
         </div>
-    `).join('');
+        `;
+    }).join('');
 }
 
 // ---- Process Files ----
@@ -99,7 +171,7 @@ function sleep(ms) {
 
 async function processFiles() {
     if (selectedFiles.length === 0) {
-        showToast('Please select at least one PDF file', 'error');
+        showToast('Please select at least one supported file (PDF or Image)', 'error');
         return;
     }
 
@@ -131,7 +203,7 @@ async function processFiles() {
         }
 
         const jobId = uploadData.job_id;
-        if (statusEl) statusEl.textContent = `Gemini AI is analyzing ${uploadData.file_count} PDF(s)...`;
+        if (statusEl) statusEl.textContent = `Gemini AI is analyzing ${uploadData.file_count} document(s)...`;
         if (progressEl) progressEl.style.width = '30%';
 
         // Step 2: Poll for results

@@ -49,8 +49,28 @@ def ocr_pdf(pdf_path: str) -> str:
         return ""
 
 
+def image_to_text(image_path: str) -> str:
+    """OCR an image using pytesseract if available."""
+    if not OCR_AVAILABLE:
+        return ""
+    try:
+        from PIL import Image
+        img = Image.open(image_path)
+        text = pytesseract.image_to_string(img, lang='eng')
+        fname = os.path.basename(image_path)
+        print(f"[IMAGE OCR] '{fname}': extracted {len(text)} chars via Tesseract")
+        return text.strip()
+    except Exception as e:
+        print(f"[IMAGE OCR ERROR] {image_path}: {e}")
+        return ""
+
+
 def pdf_to_text(pdf_path: str) -> str:
-    """Extract text from PDF. Uses pdfplumber first, falls back to OCR for scanned docs."""
+    """Extract text from PDF or image. Uses pdfplumber for PDFs, falls back to OCR."""
+    ext = os.path.splitext(pdf_path.lower())[1]
+    if ext in ['.png', '.jpg', '.jpeg', '.webp']:
+        return image_to_text(pdf_path)
+
     try:
         with pdfplumber.open(pdf_path) as pdf:
             pages = [page.extract_text() or "" for page in pdf.pages]

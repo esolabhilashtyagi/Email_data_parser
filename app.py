@@ -74,7 +74,7 @@ def process_job(job_id, save_paths, start_serial, existing):
     """Background worker: calls Gemini, saves CSV, updates job status."""
     try:
         jobs[job_id]["status"] = "processing"
-        jobs[job_id]["message"] = "Gemini AI is analyzing your PDFs..."
+        jobs[job_id]["message"] = "Gemini AI is analyzing your documents..."
 
         candidates_list = extract_candidate_details(save_paths)
 
@@ -135,9 +135,11 @@ def upload():
 
     errors = []
     save_paths = []
+    ALLOWED_EXTENSIONS = {'.pdf', '.png', '.jpg', '.jpeg', '.webp'}
     for file in files:
-        if not file.filename.lower().endswith(".pdf"):
-            errors.append({"file": file.filename, "error": "Not a PDF file"})
+        ext = os.path.splitext(file.filename.lower())[1]
+        if ext not in ALLOWED_EXTENSIONS:
+            errors.append({"file": file.filename, "error": "Unsupported file format. Supported: PDF, PNG, JPG, JPEG, WEBP"})
             continue
         safe_name = f"{uuid.uuid4().hex[:8]}_{secure_filename(file.filename)}"
         save_path = os.path.join(UPLOAD_FOLDER, safe_name)
@@ -145,13 +147,13 @@ def upload():
         save_paths.append(save_path)
 
     if not save_paths:
-        return jsonify({"error": "No valid PDF files", "errors": errors}), 400
+        return jsonify({"error": "No valid files uploaded", "errors": errors}), 400
 
     # Create job and start background thread
     job_id = uuid.uuid4().hex[:12]
     jobs[job_id] = {
         "status": "uploading",
-        "message": f"Uploading {len(save_paths)} PDF(s) to Gemini...",
+        "message": f"Uploading {len(save_paths)} document(s) to Gemini...",
         "results": None,
     }
 

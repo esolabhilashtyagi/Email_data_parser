@@ -44,7 +44,7 @@
         <section class="upload-section" id="uploadSection">
             <div class="section-header">
                 <h2><span class="material-icons-round">upload_file</span> Upload Resumes</h2>
-                <p>Drop PDF resumes and marksheets below. Gemini AI will extract all candidate details automatically.</p>
+                <p>Drop resumes, marksheets (PDF/images) or folders below. Gemini AI will extract all candidate details automatically.</p>
             </div>
 
             <div class="drop-zone" id="dropZone">
@@ -52,16 +52,18 @@
                     <div class="drop-icon">
                         <span class="material-icons-round">cloud_upload</span>
                     </div>
-                    <h3>Drag &amp; Drop PDFs Here</h3>
-                    <p>or click to browse files</p>
+                    <h3>Drag &amp; Drop Files or Folders Here</h3>
+                    <p>or click to select <span class="upload-link" style="text-decoration: underline; color: #4f46e5; font-weight: 600;">files</span> or <span class="upload-link" id="selectFolderLink" style="text-decoration: underline; color: #4f46e5; font-weight: 600;">a folder</span></p>
                     <div class="supported-formats">
                         <span class="badge">PDF</span>
-                        <span class="badge">Resume</span>
-                        <span class="badge">Marksheet</span>
-                        <span class="badge">Experience Letter</span>
+                        <span class="badge">PNG</span>
+                        <span class="badge">JPG / JPEG</span>
+                        <span class="badge">WEBP</span>
+                        <span class="badge">Folders</span>
                     </div>
                 </div>
-                <input type="file" id="fileInput" multiple accept=".pdf" hidden>
+                <input type="file" id="fileInput" multiple accept=".pdf,.png,.jpg,.jpeg,.webp" hidden>
+                <input type="file" id="folderInput" webkitdirectory directory multiple hidden>
             </div>
 
             <!-- File list -->
