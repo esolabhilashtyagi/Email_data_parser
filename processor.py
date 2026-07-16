@@ -1,7 +1,9 @@
 import os
 import re
 import json
+import time
 import pdfplumber
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
@@ -209,45 +211,62 @@ def calc_percent(s: str) -> str:
         return ""
 
 
+def _upload_one_file(path: str):
+    """Upload a single file to Gemini and wait for it to become ACTIVE. Returns (fname, g_file, doc_text, error)."""
+    fname = os.path.basename(path)
+    doc_text = pdf_to_text(path)
+    try:
+        print(f"[GEMINI] Uploading {fname}...")
+        g_file = client.files.upload(file=path, config={'display_name': fname})
+
+        # Poll until ACTIVE (max 120s per file)
+        deadline = time.time() + 120
+        while time.time() < deadline:
+            file_status = client.files.get(name=g_file.name)
+            state_str = str(file_status.state)
+            if "ACTIVE" in state_str:
+                print(f"[GEMINI] {fname} → ACTIVE")
+                return fname, g_file, doc_text, None
+            elif "FAILED" in state_str:
+                return fname, None, doc_text, f"Gemini processing FAILED for {fname}"
+            time.sleep(1)
+
+        return fname, None, doc_text, f"Timed out waiting for {fname} to become ACTIVE"
+    except Exception as e:
+        print(f"[GEMINI ERROR] {fname}: {e}")
+        return fname, None, doc_text, str(e)
+
+
 def extract_candidate_details(pdf_paths: list) -> list:
-    """Full pipeline: PDF list -> combined text -> Gemini -> list of parsed candidate dicts."""
+    """Full pipeline: PDF list -> combined text -> Gemini -> list of parsed candidate dicts.
+    Files are uploaded to Gemini in parallel for speed.
+    """
     raw_text = ""
     contents = [PROMPT_TEMPLATE]
     uploaded_files = []
 
-    import time
+    # --- Parallel upload all files at once ---
+    max_workers = min(len(pdf_paths), 8)  # up to 8 parallel uploads
+    results_map = {}  # fname -> (g_file, doc_text)
 
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_upload_one_file, path): path for path in pdf_paths}
+        for future in as_completed(futures):
+            fname, g_file, doc_text, err = future.result()
+            results_map[fname] = (g_file, doc_text, err)
+
+    # Build contents in original order
     for path in pdf_paths:
         fname = os.path.basename(path)
-        # 1. Keep text for python fallback
-        doc_text = pdf_to_text(path)
+        g_file, doc_text, err = results_map.get(fname, (None, "", "Not processed"))
         raw_text += f"\n--- Document: {fname} ---\n{doc_text}"
-        
-        # 2. Upload file to Gemini directly so it can read scanned images/PDFs natively!
-        try:
-            print(f"[GEMINI] Uploading {fname} for native OCR...")
-            g_file = client.files.upload(file=path, config={'display_name': fname})
-            
-            # Wait for file to be processed (Active)
-            print(f"[GEMINI] Waiting for {fname} to be processed by File API...")
-            while True:
-                file_status = client.files.get(name=g_file.name)
-                state_str = str(file_status.state)
-                # State can be 'State.ACTIVE', 'State.PROCESSING', 'ACTIVE', etc.
-                if "ACTIVE" in state_str:
-                    print(f"[GEMINI] {fname} is ACTIVE.")
-                    break
-                elif "FAILED" in state_str:
-                    raise RuntimeError(f"Gemini file processing failed for {fname}")
-                else:
-                    print(f"[GEMINI] {fname} state: {state_str}. Waiting 2s...")
-                    time.sleep(2)
-            
+
+        if g_file is not None:
             uploaded_files.append(g_file)
             contents.append(f"--- Document: {fname} ---")
             contents.append(g_file)
-        except Exception as e:
-            print(f"[GEMINI ERROR] Failed to upload/process {fname}: {e}")
+        else:
+            print(f"[GEMINI FALLBACK] {fname}: {err} — using extracted text instead")
             contents.append(f"--- Document: {fname} ---\n{doc_text}")
 
     try:

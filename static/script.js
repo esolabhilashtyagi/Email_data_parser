@@ -206,21 +206,28 @@ async function processFiles() {
         if (statusEl) statusEl.textContent = `Gemini AI is analyzing ${uploadData.file_count} document(s)...`;
         if (progressEl) progressEl.style.width = '30%';
 
-        // Step 2: Poll for results
+        // Step 2: Poll for results (max 20 minutes)
         let attempts = 0;
-        const maxAttempts = 200; // 200 * 3s = 10 minutes max
+        const maxAttempts = 400; // 400 * 3s = 20 minutes max
+        const startTime = Date.now();
 
         while (attempts < maxAttempts) {
-            await sleep(3000);
+            // Use 2s polling for first 2 min, then 3s
+            const pollInterval = attempts < 60 ? 2000 : 3000;
+            await sleep(pollInterval);
             attempts++;
 
             // Animate progress bar (30% → 90%)
-            const progress = 30 + Math.min(60, attempts * 2);
+            const progress = 30 + Math.min(58, attempts * 0.8);
             if (progressEl) progressEl.style.width = `${progress}%`;
 
             if (statusEl) {
+                const elapsed = Math.floor((Date.now() - startTime) / 1000);
+                const mins = Math.floor(elapsed / 60);
+                const secs = elapsed % 60;
+                const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
                 const dots = '.'.repeat((attempts % 3) + 1);
-                statusEl.textContent = `Gemini AI is analyzing PDFs and identifying candidates${dots}`;
+                statusEl.textContent = `Gemini AI analyzing documents${dots} (${timeStr} elapsed)`;
             }
 
             try {
@@ -243,7 +250,7 @@ async function processFiles() {
         }
 
         if (attempts >= maxAttempts) {
-            allErrors.push({ file: 'Processing', error: 'Timed out after 10 minutes.' });
+            allErrors.push({ file: 'Processing', error: 'Timed out after 20 minutes. Try with fewer files.' });
         }
 
     } catch (err) {
