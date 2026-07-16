@@ -8,10 +8,15 @@ from werkzeug.utils import secure_filename
 from processor import extract_candidate_details
 
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB max
+app.config["MAX_CONTENT_LENGTH"] = 150 * 1024 * 1024  # 150 MB max
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), "uploads")
 OUTPUT_CSV = os.path.join(os.path.dirname(__file__), "recruitment_tracker.csv")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+
+@app.errorhandler(413)
+def request_entity_too_large(error):
+    return jsonify({"error": "Total folder/files upload size exceeds the 150MB limit."}), 413
 
 # In-memory job store
 jobs = {}
