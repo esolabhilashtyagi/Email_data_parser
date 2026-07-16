@@ -1,11 +1,8 @@
-// ============================================
-// RecruitAI - Bulk Upload Frontend Logic
-// ============================================
-
 const dropZone = document.getElementById('dropZone');
 const fileInput = document.getElementById('fileInput');
 const folderInput = document.getElementById('folderInput');
-const selectFolderLink = document.getElementById('selectFolderLink');
+const btnSelectFiles = document.getElementById('btnSelectFiles');
+const btnSelectFolder = document.getElementById('btnSelectFolder');
 const fileList = document.getElementById('fileList');
 const fileItems = document.getElementById('fileItems');
 const actionBar = document.getElementById('actionBar');
@@ -55,22 +52,24 @@ async function traverseFileTree(item, path = "") {
     return [];
 }
 
-// ---- Drop Zone Events ----
+// ---- Button Click Handlers ----
 
-dropZone.addEventListener('click', (e) => {
-    // If they clicked on the "a folder" link specifically, open folder browser
-    if (e.target === selectFolderLink || selectFolderLink.contains(e.target)) {
-        e.stopPropagation();
-        folderInput.click();
-    } else {
-        fileInput.click();
-    }
+// "Select Files" button
+btnSelectFiles.addEventListener('click', (e) => {
+    e.stopPropagation();
+    fileInput.click();
 });
 
-selectFolderLink.addEventListener('click', (e) => {
-    e.preventDefault();
+// "Select Folder" button
+btnSelectFolder.addEventListener('click', (e) => {
     e.stopPropagation();
     folderInput.click();
+});
+
+// Drop zone click opens file picker (only if not clicking a button)
+dropZone.addEventListener('click', (e) => {
+    if (e.target.closest('button')) return; // let buttons handle themselves
+    fileInput.click();
 });
 
 dropZone.addEventListener('dragover', (e) => {

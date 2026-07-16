@@ -200,6 +200,27 @@ body {
     border-color: var(--border-hover);
 }
 
+.btn-outline {
+    background: transparent;
+    color: var(--accent);
+    border: 2px solid var(--accent);
+    font-weight: 600;
+}
+
+.btn-outline:hover {
+    background: var(--accent);
+    color: #fff;
+    transform: translateY(-1px);
+}
+
+.upload-btns {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    margin: 12px 0 6px;
+    flex-wrap: wrap;
+}
+
 .btn-sm {
     padding: 6px 12px;
     font-size: 13px;
