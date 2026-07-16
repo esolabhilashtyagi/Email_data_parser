@@ -14,6 +14,16 @@ const errorsPanel = document.getElementById('errorsPanel');
 const errorsList = document.getElementById('errorsList');
 const trackerSection = document.getElementById('trackerSection');
 
+const isFolderSelectionSupported = (() => {
+    const input = document.createElement('input');
+    return 'webkitdirectory' in input || 'directory' in input || 'mozdirectory' in input;
+})();
+
+if (!isFolderSelectionSupported && btnSelectFolder) {
+    btnSelectFolder.disabled = true;
+    btnSelectFolder.title = 'Folder selection is supported only in Chrome/Edge.';
+}
+
 let selectedFiles = [];
 
 const ALLOWED_EXTS = ['.pdf', '.png', '.jpg', '.jpeg', '.webp'];
@@ -57,13 +67,43 @@ async function traverseFileTree(item, path = "") {
 // "Select Files" button
 btnSelectFiles.addEventListener('click', (e) => {
     e.stopPropagation();
-    fileInput.click();
+    const tempInput = document.createElement('input');
+    tempInput.type = 'file';
+    tempInput.multiple = true;
+    tempInput.accept = '.pdf,.png,.jpg,.jpeg,.webp';
+    tempInput.style.display = 'none';
+    
+    tempInput.addEventListener('change', () => {
+        const files = Array.from(tempInput.files).filter(isSupportedFile);
+        addFiles(files);
+        tempInput.remove();
+    });
+    
+    document.body.appendChild(tempInput);
+    tempInput.click();
 });
 
 // "Select Folder" button
 btnSelectFolder.addEventListener('click', (e) => {
     e.stopPropagation();
-    folderInput.click();
+    if (!isFolderSelectionSupported) {
+        showToast('Folder selection is supported only in Chrome/Edge. Please use a supported browser or drag and drop a folder.', 'error');
+        return;
+    }
+    const tempInput = document.createElement('input');
+    tempInput.type = 'file';
+    tempInput.setAttribute('webkitdirectory', '');
+    tempInput.setAttribute('directory', '');
+    tempInput.style.display = 'none';
+    
+    tempInput.addEventListener('change', () => {
+        const files = Array.from(tempInput.files).filter(isSupportedFile);
+        addFiles(files);
+        tempInput.remove();
+    });
+    
+    document.body.appendChild(tempInput);
+    tempInput.click();
 });
 
 // Drop zone click opens file picker (only if not clicking a button)
@@ -112,10 +152,14 @@ folderInput.addEventListener('change', () => {
 
 // ---- File Management ----
 
+function getFileKey(file) {
+    return file.webkitRelativePath || `${file.name}-${file.size}-${file.lastModified}`;
+}
+
 function addFiles(newFiles) {
-    // Avoid duplicates by name
+    // Avoid duplicates by full path/identity
     newFiles.forEach(f => {
-        if (!selectedFiles.find(sf => sf.name === f.name)) {
+        if (!selectedFiles.find(sf => getFileKey(sf) === getFileKey(f))) {
             selectedFiles.push(f);
         }
     });
@@ -143,13 +187,14 @@ function renderFileList() {
     actionBar.style.display = 'block';
 
     fileItems.innerHTML = selectedFiles.map((f, i) => {
+        const displayName = f.webkitRelativePath || f.name;
         const ext = '.' + f.name.split('.').pop().toLowerCase();
         const icon = ext === '.pdf' ? 'picture_as_pdf' : 'image';
         return `
         <div class="file-item">
             <span class="material-icons-round">${icon}</span>
             <div class="file-item-info">
-                <div class="file-item-name">${f.name}</div>
+                <div class="file-item-name">${displayName}</div>
                 <div class="file-item-size">${(f.size / 1024 / 1024).toFixed(2)} MB</div>
             </div>
             <button class="file-item-remove" onclick="removeFile(${i})">
