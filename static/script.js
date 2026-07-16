@@ -206,19 +206,16 @@ async function processFiles() {
         if (statusEl) statusEl.textContent = `Gemini AI is analyzing ${uploadData.file_count} document(s)...`;
         if (progressEl) progressEl.style.width = '30%';
 
-        // Step 2: Poll for results (max 20 minutes)
+        // Step 2: Poll until done — no timeout, wait as long as it takes
         let attempts = 0;
-        const maxAttempts = 400; // 400 * 3s = 20 minutes max
         const startTime = Date.now();
 
-        while (attempts < maxAttempts) {
-            // Use 2s polling for first 2 min, then 3s
-            const pollInterval = attempts < 60 ? 2000 : 3000;
-            await sleep(pollInterval);
+        while (true) {
+            await sleep(2000);
             attempts++;
 
-            // Animate progress bar (30% → 90%)
-            const progress = 30 + Math.min(58, attempts * 0.8);
+            // Animate progress bar (30% → 88%, slows down over time)
+            const progress = 30 + Math.min(58, attempts * 0.5);
             if (progressEl) progressEl.style.width = `${progress}%`;
 
             if (statusEl) {
@@ -247,10 +244,6 @@ async function processFiles() {
                 // Network blip — retry silently
                 console.warn('Poll error, retrying...', pollErr);
             }
-        }
-
-        if (attempts >= maxAttempts) {
-            allErrors.push({ file: 'Processing', error: 'Timed out after 20 minutes. Try with fewer files.' });
         }
 
     } catch (err) {

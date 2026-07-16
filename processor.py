@@ -212,9 +212,11 @@ def calc_percent(s: str) -> str:
 
 
 def _upload_one_file(path: str):
-    """Upload a single file to Gemini and wait for it to become ACTIVE. Returns (fname, g_file, doc_text, error)."""
+    """Upload a single file to Gemini and wait for it to become ACTIVE.
+    Text extraction via pdfplumber is ONLY done as a fallback if upload fails.
+    Returns (fname, g_file, doc_text, error).
+    """
     fname = os.path.basename(path)
-    doc_text = pdf_to_text(path)
     try:
         print(f"[GEMINI] Uploading {fname}...")
         g_file = client.files.upload(file=path, config={'display_name': fname})
@@ -226,14 +228,15 @@ def _upload_one_file(path: str):
             state_str = str(file_status.state)
             if "ACTIVE" in state_str:
                 print(f"[GEMINI] {fname} → ACTIVE")
-                return fname, g_file, doc_text, None
+                return fname, g_file, "", None  # no text needed; Gemini reads natively
             elif "FAILED" in state_str:
-                return fname, None, doc_text, f"Gemini processing FAILED for {fname}"
+                raise RuntimeError(f"Gemini processing FAILED for {fname}")
             time.sleep(1)
 
-        return fname, None, doc_text, f"Timed out waiting for {fname} to become ACTIVE"
+        raise RuntimeError(f"Timed out waiting for {fname} to become ACTIVE")
     except Exception as e:
-        print(f"[GEMINI ERROR] {fname}: {e}")
+        print(f"[GEMINI FALLBACK] {fname}: {e} — extracting text locally...")
+        doc_text = pdf_to_text(path)  # lazy: only when upload fails
         return fname, None, doc_text, str(e)
 
 
@@ -276,7 +279,7 @@ def extract_candidate_details(pdf_paths: list) -> list:
             config=types.GenerateContentConfig(
                 temperature=0.0,
                 top_p=1,
-                max_output_tokens=16384,
+                max_output_tokens=8192,
             ),
         )
     finally:
