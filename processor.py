@@ -7,6 +7,56 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
+from pydantic import BaseModel, Field
+
+class EducationDetails10(BaseModel):
+    board: str
+    passing_year: str
+    marks: str
+    percentage: str
+    marksheet_link: str
+
+class EducationDetails12(BaseModel):
+    board: str
+    passing_year: str
+    stream: str
+    marks: str
+    percentage: str
+    marksheet_link: str
+
+class GraduationDetails(BaseModel):
+    university: str
+    degree: str
+    passing_year: str
+    marks: str
+    percentage: str
+    marksheet_link: str
+
+class PostGraduationDetails(BaseModel):
+    university: str
+    degree: str
+    passing_year: str
+    marks: str
+    percentage: str
+    marksheet_link: str
+
+class ExperienceDetails(BaseModel):
+    total_years_months: str
+    experience_letter_link: str
+
+class CandidateDetails(BaseModel):
+    candidate_name: str
+    candidate_email: str
+    date_of_birth: str
+    mobile_number: str
+    gender: str
+    state: str
+    tenth: EducationDetails10 = Field(alias="10th")
+    twelfth: EducationDetails12 = Field(alias="12th")
+    graduation: GraduationDetails
+    post_graduation: PostGraduationDetails
+    experience: ExperienceDetails
+    resume_link: str
 
 # OCR fallback for scanned PDFs
 try:
@@ -280,6 +330,8 @@ def extract_candidate_details(pdf_paths: list) -> list:
                 temperature=0.0,
                 top_p=1,
                 max_output_tokens=8192,
+                response_mime_type="application/json",
+                response_schema=list[CandidateDetails],
             ),
         )
     finally:
@@ -289,11 +341,8 @@ def extract_candidate_details(pdf_paths: list) -> list:
             except Exception as e:
                 print(f"[GEMINI WARNING] Could not delete {f.name}: {e}")
 
-    response_text = response.text.strip()
-    response_text = re.sub(r"^```json\s*", "", response_text, flags=re.I)
-    response_text = re.sub(r"\s*```$", "", response_text)
     try:
-        data = json.loads(response_text)
+        data = json.loads(response.text)
     except Exception as exc:
         raise RuntimeError(
             f"Failed to parse Gemini JSON.\nRaw output:\n{response.text}"
@@ -359,6 +408,6 @@ if __name__ == "__main__":
     if not os.path.isfile(pdf_file):
         print(f"File not found: {pdf_file}")
         sys.exit(1)
-    result = extract_candidate_details(pdf_file)
+    result = extract_candidate_details([pdf_file])
     print("\n=== Extracted Candidate JSON ===")
     print(json.dumps(result, indent=2, ensure_ascii=False))
