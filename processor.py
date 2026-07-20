@@ -7,56 +7,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field
-
-class EducationDetails10(BaseModel):
-    board: str
-    passing_year: str
-    marks: str
-    percentage: str
-    marksheet_link: str
-
-class EducationDetails12(BaseModel):
-    board: str
-    passing_year: str
-    stream: str
-    marks: str
-    percentage: str
-    marksheet_link: str
-
-class GraduationDetails(BaseModel):
-    university: str
-    degree: str
-    passing_year: str
-    marks: str
-    percentage: str
-    marksheet_link: str
-
-class PostGraduationDetails(BaseModel):
-    university: str
-    degree: str
-    passing_year: str
-    marks: str
-    percentage: str
-    marksheet_link: str
-
-class ExperienceDetails(BaseModel):
-    total_years_months: str
-    experience_letter_link: str
-
-class CandidateDetails(BaseModel):
-    candidate_name: str
-    candidate_email: str
-    date_of_birth: str
-    mobile_number: str
-    gender: str
-    state: str
-    tenth: EducationDetails10 = Field(alias="10th")
-    twelfth: EducationDetails12 = Field(alias="12th")
-    graduation: GraduationDetails
-    post_graduation: PostGraduationDetails
-    experience: ExperienceDetails
-    resume_link: str
 
 # OCR fallback for scanned PDFs
 try:
@@ -329,9 +279,8 @@ def extract_candidate_details(pdf_paths: list) -> list:
             config=types.GenerateContentConfig(
                 temperature=0.0,
                 top_p=1,
-                max_output_tokens=8192,
+                max_output_tokens=65536,
                 response_mime_type="application/json",
-                response_schema=list[CandidateDetails],
             ),
         )
     finally:
@@ -341,12 +290,55 @@ def extract_candidate_details(pdf_paths: list) -> list:
             except Exception as e:
                 print(f"[GEMINI WARNING] Could not delete {f.name}: {e}")
 
+    # --- Robust JSON parsing with repair fallbacks ---
+    response_text = response.text.strip()
+    print(f"[GEMINI] Raw response length: {len(response_text)} chars")
+
+    data = None
+    # Attempt 1: direct parse
     try:
-        data = json.loads(response.text)
-    except Exception as exc:
+        data = json.loads(response_text)
+    except json.JSONDecodeError:
+        pass
+
+    # Attempt 2: strip markdown fences
+    if data is None:
+        cleaned = re.sub(r"^```(?:json)?\s*", "", response_text, flags=re.I)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+        try:
+            data = json.loads(cleaned)
+        except json.JSONDecodeError:
+            pass
+
+    # Attempt 3: find the JSON array/object substring
+    if data is None:
+        m = re.search(r'(\[.*\]|\{.*\})', response_text, re.DOTALL)
+        if m:
+            try:
+                data = json.loads(m.group(1))
+            except json.JSONDecodeError:
+                pass
+
+    # Attempt 4: truncated JSON — try to close open brackets
+    if data is None:
+        repaired = response_text.rstrip()
+        if repaired.startswith('['):
+            # Count unclosed braces/brackets
+            open_b = repaired.count('{') - repaired.count('}')
+            open_a = repaired.count('[') - repaired.count(']')
+            repaired += '}' * max(0, open_b)
+            repaired += ']' * max(0, open_a)
+            try:
+                data = json.loads(repaired)
+                print(f"[GEMINI] Repaired truncated JSON successfully")
+            except json.JSONDecodeError:
+                pass
+
+    if data is None:
         raise RuntimeError(
-            f"Failed to parse Gemini JSON.\nRaw output:\n{response.text}"
-        ) from exc
+            f"Failed to parse Gemini JSON after all repair attempts.\n"
+            f"Raw output (first 500 chars): {response_text[:500]}"
+        )
 
     # Ensure we always have a list
     if isinstance(data, dict):

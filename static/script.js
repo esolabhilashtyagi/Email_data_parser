@@ -198,10 +198,34 @@ async function processFiles() {
     try {
         // Step 1: Upload files and get job_id (returns instantly)
         const uploadResp = await fetch('/upload', { method: 'POST', body: formData });
+        
+        if (!uploadResp.ok) {
+            let errorText = 'Upload failed';
+            try {
+                const errorData = await uploadResp.json();
+                if (errorData && errorData.error) {
+                    errorText = errorData.error;
+                }
+            } catch (e) {
+                try {
+                    const text = await uploadResp.text();
+                    if (text && text.length < 200) {
+                        errorText = text;
+                    } else {
+                        errorText = `Upload failed (Status ${uploadResp.status})`;
+                    }
+                } catch (e2) {
+                    errorText = `Upload failed (Status ${uploadResp.status})`;
+                }
+            }
+            allErrors.push({ file: 'Upload', error: errorText });
+            throw new Error(errorText);
+        }
+
         const uploadData = await uploadResp.json();
 
-        if (!uploadResp.ok || !uploadData.job_id) {
-            allErrors.push({ file: 'Upload', error: uploadData.error || 'Upload failed' });
+        if (!uploadData || !uploadData.job_id) {
+            allErrors.push({ file: 'Upload', error: 'Invalid response from server' });
             throw new Error('Upload failed');
         }
 
@@ -232,6 +256,10 @@ async function processFiles() {
 
             try {
                 const pollResp = await fetch(`/job/${jobId}`);
+                if (!pollResp.ok) {
+                    console.warn(`Poll returned status ${pollResp.status}`);
+                    continue; // retry
+                }
                 const pollData = await pollResp.json();
 
                 if (pollData.status === 'done') {
