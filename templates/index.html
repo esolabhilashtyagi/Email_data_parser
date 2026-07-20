@@ -44,7 +44,7 @@
         <section class="upload-section" id="uploadSection">
             <div class="section-header">
                 <h2><span class="material-icons-round">upload_file</span> Upload Resumes</h2>
-                <p>Drop resumes, marksheets (PDF/images) or folders below. Gemini AI will extract all candidate details automatically.</p>
+                <p>Drop resumes or marksheets (PDF/images) below. Gemini AI will extract all candidate details automatically.</p>
             </div>
 
             <div class="drop-zone" id="dropZone">
@@ -52,14 +52,11 @@
                     <div class="drop-icon">
                         <span class="material-icons-round">cloud_upload</span>
                     </div>
-                    <h3>Drag &amp; Drop Files or Folders Here</h3>
-                    <p>or use the buttons below</p>
+                    <h3>Drag &amp; Drop Files Here</h3>
+                    <p>or use the button below</p>
                     <div class="upload-btns">
                         <button class="btn btn-outline" id="btnSelectFiles" type="button">
                             <span class="material-icons-round">insert_drive_file</span> Select Files
-                        </button>
-                        <button class="btn btn-outline" id="btnSelectFolder" type="button">
-                            <span class="material-icons-round">folder_open</span> Select Folder
                         </button>
                     </div>
                     <div class="supported-formats">
@@ -67,11 +64,9 @@
                         <span class="badge">PNG</span>
                         <span class="badge">JPG / JPEG</span>
                         <span class="badge">WEBP</span>
-                        <span class="badge">Folders</span>
                     </div>
                 </div>
                 <input type="file" id="fileInput" multiple accept=".pdf,.png,.jpg,.jpeg,.webp" style="display: none;">
-                <input type="file" id="folderInput" webkitdirectory directory style="display: none;">
             </div>
 
             <!-- File list -->
@@ -142,6 +137,6 @@
     <!-- Toast notifications -->
     <div class="toast-container" id="toastContainer"></div>
 
-    <script src="/static/script.js?v=10"></script>
+    <script src="/static/script.js?v=11"></script>
 </body>
 </html>

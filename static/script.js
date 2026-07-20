@@ -1,8 +1,6 @@
 const dropZone = document.getElementById('dropZone');
 const fileInput = document.getElementById('fileInput');
-const folderInput = document.getElementById('folderInput');
 const btnSelectFiles = document.getElementById('btnSelectFiles');
-const btnSelectFolder = document.getElementById('btnSelectFolder');
 const fileList = document.getElementById('fileList');
 const fileItems = document.getElementById('fileItems');
 const actionBar = document.getElementById('actionBar');
@@ -13,16 +11,6 @@ const resultsSummary = document.getElementById('resultsSummary');
 const errorsPanel = document.getElementById('errorsPanel');
 const errorsList = document.getElementById('errorsList');
 const trackerSection = document.getElementById('trackerSection');
-
-const isFolderSelectionSupported = (() => {
-    const input = document.createElement('input');
-    return 'webkitdirectory' in input || 'directory' in input || 'mozdirectory' in input;
-})();
-
-if (!isFolderSelectionSupported && btnSelectFolder) {
-    btnSelectFolder.disabled = true;
-    btnSelectFolder.title = 'Folder selection is supported only in Chrome/Edge.';
-}
 
 let selectedFiles = [];
 
@@ -71,29 +59,6 @@ btnSelectFiles.addEventListener('click', (e) => {
     tempInput.type = 'file';
     tempInput.multiple = true;
     tempInput.accept = '.pdf,.png,.jpg,.jpeg,.webp';
-    tempInput.style.display = 'none';
-    
-    tempInput.addEventListener('change', () => {
-        const files = Array.from(tempInput.files).filter(isSupportedFile);
-        addFiles(files);
-        tempInput.remove();
-    });
-    
-    document.body.appendChild(tempInput);
-    tempInput.click();
-});
-
-// "Select Folder" button
-btnSelectFolder.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (!isFolderSelectionSupported) {
-        showToast('Folder selection is supported only in Chrome/Edge. Please use a supported browser or drag and drop a folder.', 'error');
-        return;
-    }
-    const tempInput = document.createElement('input');
-    tempInput.type = 'file';
-    tempInput.setAttribute('webkitdirectory', '');
-    tempInput.setAttribute('directory', '');
     tempInput.style.display = 'none';
     
     tempInput.addEventListener('change', () => {
