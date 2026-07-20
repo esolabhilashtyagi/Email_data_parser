@@ -109,12 +109,6 @@ fileInput.addEventListener('change', () => {
     fileInput.value = ''; // reset so same file can be re-added
 });
 
-folderInput.addEventListener('change', () => {
-    const files = Array.from(folderInput.files).filter(isSupportedFile);
-    addFiles(files);
-    folderInput.value = ''; // reset
-});
-
 // ---- File Management ----
 
 function getFileKey(file) {
