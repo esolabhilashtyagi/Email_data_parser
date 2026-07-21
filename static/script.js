@@ -366,7 +366,7 @@ function renderResults(data) {
                     <div class="detail-group">
                         <div class="detail-group-title"><span class="material-icons-round" style="font-size:14px">work</span> Experience & Resume</div>
                         <div class="detail-row"><span class="detail-label">Total Experience</span><span class="detail-value highlight">${candidate['Total Experience'] || '-'}</span></div>
-                        <div class="detail-row"><span class="detail-label">CV/Resume</span><span class="detail-value highlight">${candidate['Resume (attachment)'] || '-'}</span></div>
+                        <div class="detail-row"><span class="detail-label">CV/Resume</span><span class="detail-value highlight">${formatTableCell(candidate['Resume (attachment)'])}</span></div>
                     </div>
                 </div>
             `;
@@ -403,6 +403,17 @@ async function loadTracker() {
     }
 }
 
+function formatTableCell(val) {
+    if (!val || typeof val !== 'string') return val || '-';
+    const match = val.match(/=HYPERLINK\("([^"]+)"\s*,\s*"([^"]+)"\)/i);
+    if (match) {
+        const url = match[1];
+        const label = match[2];
+        return `<a href="${url}" target="_blank" style="color:var(--accent);font-weight:600;text-decoration:underline;"><span class="material-icons-round" style="font-size:14px;vertical-align:middle;">open_in_new</span> ${label}</a>`;
+    }
+    return val;
+}
+
 function renderTrackerTable(dataArray) {
     trackerSection.style.display = 'block';
     const thead = document.getElementById('trackerHead');
@@ -427,7 +438,12 @@ function renderTrackerTable(dataArray) {
         const tr = document.createElement('tr');
         headers.forEach(h => {
             const td = document.createElement('td');
-            td.innerText = row[h] !== null && row[h] !== undefined ? row[h] : '';
+            const cellVal = row[h] !== null && row[h] !== undefined ? String(row[h]) : '';
+            if (cellVal.includes('=HYPERLINK(')) {
+                td.innerHTML = formatTableCell(cellVal);
+            } else {
+                td.innerText = cellVal;
+            }
             tr.appendChild(td);
         });
         tbody.appendChild(tr);
