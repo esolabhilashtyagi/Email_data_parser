@@ -211,84 +211,91 @@ def calc_percent(s: str) -> str:
         return ""
 
 
-def _upload_one_file(path: str):
-    """Upload a single file to Gemini and wait for it to become ACTIVE.
-    Text extraction via pdfplumber is ONLY done as a fallback if upload fails.
-    Returns (fname, g_file, doc_text, error).
+def _process_one_file(path: str):
+    """Process a single file locally for maximum speed:
+    - If it's an image (.png, .jpg, etc.): send inline bytes as Part.from_bytes.
+    - If it's a PDF: extract text via pdfplumber.
+      - If text length >= 50: return extracted text (instantaneous & super fast for Gemini!).
+      - If text length < 50 (scanned PDF): send inline PDF bytes as Part.from_bytes.
+    Returns (fname, is_text, content_item, extracted_text).
     """
     fname = os.path.basename(path)
+    ext = os.path.splitext(path.lower())[1]
+
+    # Image files -> inline bytes
+    if ext in ['.png', '.jpg', '.jpeg', '.webp']:
+        mime_map = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp'}
+        mime = mime_map.get(ext, 'image/jpeg')
+        try:
+            with open(path, 'rb') as f:
+                raw_bytes = f.read()
+            part = types.Part.from_bytes(data=raw_bytes, mime_type=mime)
+            return fname, False, part, ""
+        except Exception as e:
+            print(f"[IMAGE READ ERROR] {fname}: {e}")
+            return fname, True, "", ""
+
+    # PDF files -> try fast local text extraction
+    text = ""
     try:
-        print(f"[GEMINI] Uploading {fname}...")
-        g_file = client.files.upload(file=path, config={'display_name': fname})
-
-        # Poll until ACTIVE (max 120s per file)
-        deadline = time.time() + 120
-        while time.time() < deadline:
-            file_status = client.files.get(name=g_file.name)
-            state_str = str(file_status.state)
-            if "ACTIVE" in state_str:
-                print(f"[GEMINI] {fname} → ACTIVE")
-                return fname, g_file, "", None  # no text needed; Gemini reads natively
-            elif "FAILED" in state_str:
-                raise RuntimeError(f"Gemini processing FAILED for {fname}")
-            time.sleep(1)
-
-        raise RuntimeError(f"Timed out waiting for {fname} to become ACTIVE")
+        with pdfplumber.open(path) as pdf:
+            pages = [page.extract_text() or "" for page in pdf.pages]
+        text = "\n".join(pages).strip()
     except Exception as e:
-        print(f"[GEMINI FALLBACK] {fname}: {e} — extracting text locally...")
-        doc_text = pdf_to_text(path)  # lazy: only when upload fails
-        return fname, None, doc_text, str(e)
+        print(f"[PDF EXTRACT ERROR] {fname}: {e}")
+
+    # If digital PDF with text >= 50 chars -> send text
+    if len(text) >= 50:
+        print(f"[FAST EXTRACT] '{fname}': extracted {len(text)} text chars locally")
+        return fname, True, text, text
+
+    # Scanned PDF (text < 50) -> send inline PDF bytes directly to Gemini vision
+    print(f"[FAST SCANNED PDF] '{fname}': scanned PDF (<50 text chars), sending inline bytes to Gemini")
+    try:
+        with open(path, 'rb') as f:
+            raw_bytes = f.read()
+        part = types.Part.from_bytes(data=raw_bytes, mime_type="application/pdf")
+        return fname, False, part, text
+    except Exception as e:
+        print(f"[PDF READ ERROR] {fname}: {e}")
+        return fname, True, text, text
 
 
 def extract_candidate_details(pdf_paths: list) -> list:
-    """Full pipeline: PDF list -> combined text -> Gemini -> list of parsed candidate dicts.
-    Files are uploaded to Gemini in parallel for speed.
+    """Full pipeline: PDF list -> fast parallel prep -> Gemini AI -> parsed candidate dicts.
+    Uses zero-overhead inline bytes & local text extraction for maximum speed.
     """
     raw_text = ""
     contents = [PROMPT_TEMPLATE]
-    uploaded_files = []
 
-    # --- Parallel upload all files at once ---
-    max_workers = min(len(pdf_paths), 8)  # up to 8 parallel uploads
-    results_map = {}  # fname -> (g_file, doc_text)
+    # --- Parallel local processing of all files ---
+    max_workers = min(len(pdf_paths), 8)
+    results_map = {}
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(_upload_one_file, path): path for path in pdf_paths}
+        futures = {executor.submit(_process_one_file, path): path for path in pdf_paths}
         for future in as_completed(futures):
-            fname, g_file, doc_text, err = future.result()
-            results_map[fname] = (g_file, doc_text, err)
+            fname, is_text, content_item, extracted_text = future.result()
+            results_map[fname] = (is_text, content_item, extracted_text)
 
     # Build contents in original order
     for path in pdf_paths:
         fname = os.path.basename(path)
-        g_file, doc_text, err = results_map.get(fname, (None, "", "Not processed"))
-        raw_text += f"\n--- Document: {fname} ---\n{doc_text}"
+        is_text, content_item, extracted_text = results_map.get(fname, (True, "", ""))
+        raw_text += f"\n--- Document: {fname} ---\n{extracted_text}"
+        contents.append(f"--- Document: {fname} ---")
+        contents.append(content_item)
 
-        if g_file is not None:
-            uploaded_files.append(g_file)
-            contents.append(f"--- Document: {fname} ---")
-            contents.append(g_file)
-        else:
-            print(f"[GEMINI FALLBACK] {fname}: {err} — using extracted text instead")
-            contents.append(f"--- Document: {fname} ---\n{doc_text}")
-
-    try:
-        response = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=contents,
-            config=types.GenerateContentConfig(
-                temperature=0.0,
-                top_p=1,
-                max_output_tokens=65536,
-                response_mime_type="application/json",
-            ),
-        )
-    finally:
-        for f in uploaded_files:
-            try:
-                client.files.delete(name=f.name)
-            except Exception as e:
-                print(f"[GEMINI WARNING] Could not delete {f.name}: {e}")
+    response = client.models.generate_content(
+        model=MODEL_NAME,
+        contents=contents,
+        config=types.GenerateContentConfig(
+            temperature=0.0,
+            top_p=0.95,
+            max_output_tokens=65536,
+            response_mime_type="application/json",
+        ),
+    )
 
     # --- Robust JSON parsing with repair fallbacks ---
     response_text = response.text.strip()
