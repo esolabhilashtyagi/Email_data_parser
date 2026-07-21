@@ -259,11 +259,5 @@ def download_csv():
     return send_file(OUTPUT_CSV, as_attachment=True, download_name="recruitment_tracker.csv")
 
 
-@app.route("/uploads/<path:filename>")
-def serve_upload(filename):
-    """Serve uploaded documents for browser viewing."""
-    return send_from_directory(UPLOAD_FOLDER, filename)
-
-
 if __name__ == "__main__":
     app.run(debug=True, port=PORT)
