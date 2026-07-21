@@ -6,6 +6,7 @@ import logging
 import threading
 import pandas as pd
 from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
 from processor import extract_candidate_details
 
@@ -17,11 +18,17 @@ class NoPollingFilter(logging.Filter):
 logging.getLogger('werkzeug').addFilter(NoPollingFilter())
 
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 app.config["MAX_CONTENT_LENGTH"] = 150 * 1024 * 1024  # 150 MB max
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), "uploads")
 OUTPUT_CSV = os.path.join(os.path.dirname(__file__), "recruitment_tracker.csv")
 PORT = int(os.environ.get("PORT", 5030))
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+
+@app.route("/favicon.ico")
+def favicon():
+    return "", 204
 
 
 @app.errorhandler(413)

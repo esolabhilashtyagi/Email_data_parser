@@ -1,1 +1,1 @@
-web: gunicorn --worker-class gevent --workers 1 --timeout 300 --keep-alive 5 app:app
+web: gunicorn -w 2 -k gthread --timeout 300 app:app
