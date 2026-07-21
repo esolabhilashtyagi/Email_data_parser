@@ -2,6 +2,7 @@ import os
 import re
 import json
 import time
+import threading
 import pdfplumber
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from google import genai
@@ -265,11 +266,14 @@ def extract_candidate_details(pdf_paths: list) -> list:
     """Full pipeline: PDF list -> fast parallel prep -> Gemini AI -> parsed candidate dicts.
     Uses zero-overhead inline bytes & local text extraction for maximum speed.
     """
+    if isinstance(pdf_paths, str):
+        pdf_paths = [pdf_paths]
+
     raw_text = ""
     contents = [PROMPT_TEMPLATE]
 
     # --- Parallel local processing of all files ---
-    max_workers = min(len(pdf_paths), 8)
+    max_workers = min(len(pdf_paths), 16)
     results_map = {}
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:

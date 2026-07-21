@@ -1,4 +1,4 @@
-﻿import os
+import os
 import json
 import pandas as pd
 from processor import extract_candidate_details
@@ -78,10 +78,11 @@ def run_batch():
         serial = start_serial + i
         print(f"\n[{serial}] Processing: {pdf_name} ...")
         try:
-            data = extract_candidate_details(pdf_path)
-            row = flatten_candidate(data, serial, pdf_path)
-            rows.append(row)
-            print(f"    -> Extracted: {row['Candidate Name']} | {row['Candidate Email']}")
+            candidates_list = extract_candidate_details([pdf_path])
+            for raw_data in candidates_list:
+                row = flatten_candidate(raw_data, serial, pdf_path)
+                rows.append(row)
+                print(f"    -> Extracted: {row['Candidate Name']} | {row['Candidate Email']}")
         except Exception as e:
             print(f"    -> ERROR processing {pdf_name}: {e}")
 

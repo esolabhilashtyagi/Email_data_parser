@@ -1,4 +1,28 @@
+# Environment & Secrets
 .env
+.env.*
+*.env
+
+# Python & Caches
 __pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+
+# Virtual Environments
+.venv/
+venv/
+env/
+
+# Application Data & Uploads
 uploads/
 recruitment_tracker.csv
+scratch/
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

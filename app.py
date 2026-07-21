@@ -2,16 +2,25 @@ import os
 import re
 import json
 import uuid
+import logging
 import threading
 import pandas as pd
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
 from werkzeug.utils import secure_filename
 from processor import extract_candidate_details
+
+# Filter out repetitive polling logs from terminal output
+class NoPollingFilter(logging.Filter):
+    def filter(self, record):
+        return '/job/' not in record.getMessage()
+
+logging.getLogger('werkzeug').addFilter(NoPollingFilter())
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 150 * 1024 * 1024  # 150 MB max
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), "uploads")
 OUTPUT_CSV = os.path.join(os.path.dirname(__file__), "recruitment_tracker.csv")
+PORT = int(os.environ.get("PORT", 5030))
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 
@@ -53,7 +62,7 @@ def make_excel_link(filename: str, base_url: str = "") -> str:
     if base_url:
         url = f"{base_url.rstrip('/')}/uploads/{clean_name}"
     else:
-        url = f"/uploads/{clean_name}"
+        url = f"http://localhost:{PORT}/uploads/{clean_name}"
     return f'=HYPERLINK("{url}", "View Document")'
 
 
@@ -250,5 +259,11 @@ def download_csv():
     return send_file(OUTPUT_CSV, as_attachment=True, download_name="recruitment_tracker.csv")
 
 
+@app.route("/uploads/<path:filename>")
+def serve_upload(filename):
+    """Serve uploaded documents for browser viewing."""
+    return send_from_directory(UPLOAD_FOLDER, filename)
+
+
 if __name__ == "__main__":
-    app.run(debug=True, port=5030)
+    app.run(debug=True, port=PORT)
