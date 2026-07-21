@@ -118,8 +118,8 @@ def flatten_candidate(data: dict, serial: int, pdf_path: str, base_url: str = ""
     }
 
 
-def process_job(job_id, save_paths, start_serial, existing, base_url=""):
-    """Background worker: calls Gemini, saves CSV, updates job status."""
+def process_job(job_id, save_paths, base_url=""):
+    """Background worker: calls Gemini, saves CSV with fresh upload data, updates job status."""
     try:
         jobs[job_id]["status"] = "processing"
         jobs[job_id]["message"] = "Gemini AI is analyzing your documents..."
@@ -128,18 +128,13 @@ def process_job(job_id, save_paths, start_serial, existing, base_url=""):
 
         results = []
         for raw_data in candidates_list:
-            serial = start_serial + len(results)
+            serial = 1 + len(results)
             flat = flatten_candidate(raw_data, serial, "", base_url)
             results.append(flat)
 
-        # Append to tracker CSV
+        # Overwrite tracker CSV with freshly extracted upload data only
         if results:
-            new_df = pd.DataFrame(results)
-            if existing is not None:
-                existing = fix_hyperlinks_in_df(existing, base_url)
-                final_df = pd.concat([existing, new_df], ignore_index=True)
-            else:
-                final_df = new_df
+            final_df = pd.DataFrame(results)
             final_df.to_csv(OUTPUT_CSV, index=False)
 
         jobs[job_id]["status"] = "done"
@@ -147,7 +142,7 @@ def process_job(job_id, save_paths, start_serial, existing, base_url=""):
             "success": True,
             "extracted": results,
             "errors": [],
-            "total_in_tracker": (len(existing) if existing is not None else 0) + len(results),
+            "total_in_tracker": len(results),
         }
     except Exception as e:
         jobs[job_id]["status"] = "error"
@@ -184,14 +179,6 @@ def upload():
     if not files or files[0].filename == "":
         return jsonify({"error": "No files selected"}), 400
 
-    # Determine starting serial number
-    if os.path.isfile(OUTPUT_CSV):
-        existing = pd.read_csv(OUTPUT_CSV)
-        start_serial = len(existing) + 1
-    else:
-        existing = None
-        start_serial = 1
-
     errors = []
     save_paths = []
     ALLOWED_EXTENSIONS = {'.pdf', '.png', '.jpg', '.jpeg', '.webp'}
@@ -219,7 +206,7 @@ def upload():
         "results": None,
     }
 
-    thread = threading.Thread(target=process_job, args=(job_id, save_paths, start_serial, existing, base_url))
+    thread = threading.Thread(target=process_job, args=(job_id, save_paths, base_url))
     thread.daemon = True
     thread.start()
 
