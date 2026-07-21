@@ -262,43 +262,21 @@ def _process_one_file(path: str):
         return fname, True, text, text
 
 
-def group_files_by_candidate(pdf_paths: list) -> list:
-    """Group file paths by candidate name found in filename or split into small chunks.
-    Example filename: '766ed66c_XII_-_pragya_sharma.pdf' -> group key 'pragya_sharma'
+def extract_candidate_details(pdf_paths: list) -> list:
+    """Full pipeline: PDF list -> fast parallel local prep -> Gemini AI -> list of parsed candidate dicts.
+    Passes all documents together in a single Gemini request so AI correctly groups documents by distinct candidate.
     """
-    groups = {}
-    ungrouped = []
+    if isinstance(pdf_paths, str):
+        pdf_paths = [pdf_paths]
 
-    for path in pdf_paths:
-        fname = os.path.basename(path)
-        # Check for '_-_' pattern like '766ed66c_XII_-_pragya_sharma.pdf'
-        if "_-_" in fname:
-            key = fname.rsplit("_-_", 1)[-1].rsplit(".", 1)[0].strip().lower()
-            groups.setdefault(key, []).append(path)
-        elif " - " in fname:
-            key = fname.rsplit(" - ", 1)[-1].rsplit(".", 1)[0].strip().lower()
-            groups.setdefault(key, []).append(path)
-        else:
-            ungrouped.append(path)
+    if not pdf_paths:
+        return []
 
-    grouped_list = list(groups.values())
-
-    # Chunk any ungrouped files into small batches of max 4 files for fast parallel processing
-    if ungrouped:
-        chunk_size = 4
-        for i in range(0, len(ungrouped), chunk_size):
-            grouped_list.append(ungrouped[i:i + chunk_size])
-
-    return grouped_list if grouped_list else [pdf_paths]
-
-
-def _extract_single_group(pdf_paths: list) -> list:
-    """Process a single group of candidate files with Gemini AI."""
     raw_text = ""
     contents = [PROMPT_TEMPLATE]
 
-    # Parallel local prep for this group
-    max_workers = min(len(pdf_paths), 8)
+    # --- Parallel local file preparation ---
+    max_workers = min(len(pdf_paths), 16)
     results_map = {}
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -315,6 +293,7 @@ def _extract_single_group(pdf_paths: list) -> list:
         contents.append(f"--- Document: {fname} ---")
         contents.append(content_item)
 
+    print(f"[GEMINI] Processing {len(pdf_paths)} document(s) together...")
     response = client.models.generate_content(
         model=MODEL_NAME,
         contents=contents,
@@ -327,7 +306,7 @@ def _extract_single_group(pdf_paths: list) -> list:
     )
 
     response_text = response.text.strip()
-    print(f"[GEMINI GROUP] Response length: {len(response_text)} chars for {len(pdf_paths)} PDF(s)")
+    print(f"[GEMINI] Raw response length: {len(response_text)} chars")
 
     data = None
     try:
@@ -364,13 +343,14 @@ def _extract_single_group(pdf_paths: list) -> list:
                 pass
 
     if data is None:
-        print(f"[GEMINI GROUP WARNING] Failed to parse group JSON: {response_text[:300]}")
-        return []
+        raise RuntimeError(f"Failed to parse Gemini JSON: {response_text[:300]}")
 
     if isinstance(data, dict):
         data = [data]
 
-    # Python fallback per candidate: if AI left marks/percentage empty
+    print(f"[GEMINI] Identified {len(data)} distinct candidate(s) from {len(pdf_paths)} document(s)")
+
+    # Python fallback per candidate
     LEVEL_KEYWORDS = {
         "10th":            ["10th", "matriculat", "secondary", "ssc", "class x", "class 10", "x board"],
         "12th":            ["12th", "intermediate", "higher secondary", "hsc", "class xii", "class 12", "xii board"],
@@ -404,35 +384,6 @@ def _extract_single_group(pdf_paths: list) -> list:
                 entry["percentage"] = calc_percent(entry["marks"])
 
     return data
-
-
-def extract_candidate_details(pdf_paths: list) -> list:
-    """Full pipeline: PDF list -> parallel candidate batch prep -> Gemini AI -> parsed candidate dicts.
-    Runs multiple candidate groups concurrently for 10x-15x faster response times.
-    """
-    if isinstance(pdf_paths, str):
-        pdf_paths = [pdf_paths]
-
-    if not pdf_paths:
-        return []
-
-    file_groups = group_files_by_candidate(pdf_paths)
-
-    if len(file_groups) > 1:
-        print(f"[PARALLEL AI] Processing {len(pdf_paths)} document(s) across {len(file_groups)} parallel candidate batches...")
-        all_candidates = []
-        with ThreadPoolExecutor(max_workers=min(len(file_groups), 8)) as group_exec:
-            futures = [group_exec.submit(_extract_single_group, group) for group in file_groups]
-            for future in as_completed(futures):
-                try:
-                    res = future.result()
-                    if res:
-                        all_candidates.extend(res)
-                except Exception as e:
-                    print(f"[PARALLEL BATCH ERROR]: {e}")
-        return all_candidates
-    else:
-        return _extract_single_group(file_groups[0])
 
 
 if __name__ == "__main__":
